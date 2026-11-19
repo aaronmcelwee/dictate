@@ -51,6 +51,20 @@ internal sealed class AppSettings
         set => _values[nameof(PolishEnabled)] = value;
     }
 
+    /// <summary>Whether clean-up matches the app's style (email, chat, AI prompt, code).</summary>
+    public bool AppStyle
+    {
+        get => Get(nameof(AppStyle), true);
+        set => _values[nameof(AppStyle)] = value;
+    }
+
+    /// <summary>Whether text near the cursor (read on the PC) helps clean-up and bot instructions.</summary>
+    public bool ScreenContext
+    {
+        get => Get(nameof(ScreenContext), true);
+        set => _values[nameof(ScreenContext)] = value;
+    }
+
     /// <summary>The microphone's device id, or empty for Windows' default.</summary>
     public string MicrophoneId
     {

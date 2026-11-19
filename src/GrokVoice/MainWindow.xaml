@@ -141,6 +141,22 @@
                     <ToggleSwitch x:Name="PolishSwitch" Toggled="PolishSwitch_Toggled" />
                 </tk:SettingsCard>
 
+                <tk:SettingsCard Header="Match the app"
+                                 Description="Writes like the app you're in: full sentences for email, short and casual for chat, exact wording for AI prompts, literal for code.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A1;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <ToggleSwitch x:Name="AppStyleSwitch" Toggled="AppStyleSwitch_Toggled" />
+                </tk:SettingsCard>
+
+                <tk:SettingsCard Header="Use what's on screen"
+                                 Description="Reads the text around your cursor on this PC (or, in mail and chat apps, recognises it on screen) so names are spelled right and 'reply to this' makes sense. Used only when it helps, and sent only with that dictation.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE7B3;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <ToggleSwitch x:Name="ScreenSwitch" Toggled="ScreenSwitch_Toggled" />
+                </tk:SettingsCard>
+
                 <tk:SettingsCard x:Name="DictionaryCard" Header="Dictionary"
                                  Description="Your words, replacements and snippets.">
                     <tk:SettingsCard.HeaderIcon>

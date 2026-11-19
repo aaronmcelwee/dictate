@@ -71,6 +71,8 @@ public sealed partial class MainWindow : Window
         RightAltSwitch.IsOn = _host.RightAltEnabled;
         PolishSwitch.IsOn = _host.Settings.PolishEnabled;
         RestingSwitch.IsOn = _host.RestingPill;
+        AppStyleSwitch.IsOn = _host.Settings.AppStyle;
+        ScreenSwitch.IsOn = _host.Settings.ScreenContext;
         ShowMicrophones();
         ShowUsage();
         _host.Usage.Changed += () => DispatcherQueue.TryEnqueue(ShowUsage);
@@ -415,6 +417,16 @@ public sealed partial class MainWindow : Window
     {
         if (_loading || MicBox.SelectedItem is not ComboBoxItem { Tag: string id }) return;
         if (id != _host.MicrophoneId) _host.MicrophoneId = id;
+    }
+
+    private void AppStyleSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loading) _host.Settings.AppStyle = AppStyleSwitch.IsOn;
+    }
+
+    private void ScreenSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loading) _host.Settings.ScreenContext = ScreenSwitch.IsOn;
     }
 
     private void RestingSwitch_Toggled(object sender, RoutedEventArgs e)

@@ -48,7 +48,11 @@ internal sealed class DictationHost : IDisposable
         var keyboard = new KeyboardTextSink { IsOwnWindow = h => h == _pill.Handle || h == MainWindowHandle };
         Words = new GrokVoice.Words.WordDictionary();
         Polisher = new GrokVoice.Words.TextPolisher(() => Keys.Get(), Words, () => Settings.PolishEnabled, Usage);
-        _sink = new RoutingTextSink(keyboard, Bot, Polisher.PolishAsync);
+        _sink = new RoutingTextSink(keyboard, Bot, Polisher.PolishAsync, WithScreenContext);
+        Polisher.Context = () => _context;
+        Polisher.ToBot = () => _sink.Current == DictationTarget.Bot;
+        Polisher.UseAppStyle = () => Settings.AppStyle;
+        Polisher.UseScreen = () => Settings.ScreenContext;
 
         // Before the controller, which opens the microphone straight away when it's kept warm.
         _mic.DeviceId = Settings.MicrophoneId is { Length: > 0 } micId ? micId : null;
@@ -297,6 +301,21 @@ internal sealed class DictationHost : IDisposable
         return Path.Combine(DiagnosticsRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    private Task<GrokVoice.Context.DictationContext>? _context;
+
+    /// <summary>
+    /// An instruction for the bot that points at something on screen ("reply to this") gets the
+    /// nearby text appended, so the bot knows what "this" is.
+    /// </summary>
+    private string WithScreenContext(string text)
+    {
+        if (!Settings.ScreenContext || _context is not { IsCompletedSuccessfully: true } done) return text;
+        var context = done.Result;
+        if (context.Text.Length == 0 || !(context.IsReplyApp || GrokVoice.Context.AppAwareness.RefersToScreen(text))) return text;
+        var where = context.Title.Length > 0 ? $"{context.Process}: {context.Title}" : context.Process;
+        return $"{text}\n\n---\nContext from my screen ({where}):\n{context.Text}";
+    }
+
     private void SaveResult(string heard, string delivered)
     {
         if (_diagnostics is null) return;
@@ -311,6 +330,17 @@ internal sealed class DictationHost : IDisposable
                 ["clean_up"] = Polisher.LastNote,
                 ["delivered"] = delivered,
                 ["microphone"] = _mic.Description,
+                ["app"] = _context is { IsCompletedSuccessfully: true } c ? new Dictionary<string, object?>
+                {
+                    ["process"] = c.Result.Process,
+                    ["title"] = c.Result.Title,
+                    ["kind"] = c.Result.Kind.ToString(),
+                    ["source"] = c.Result.Source,
+                    ["read_ms"] = c.Result.Milliseconds,
+                    ["chars"] = c.Result.Text.Length,
+                } : null,
+                ["style"] = Polisher.LastStyle,
+                ["screen_text_used"] = Polisher.LastContext,
                 ["dictionary_entries"] = Words.Entries.Count,
                 ["version"] = Windows.ApplicationModel.Package.Current.Id.Version is var v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : "",
             };
@@ -440,6 +470,10 @@ internal sealed class DictationHost : IDisposable
         switch (status)
         {
             case DictationStatus.Listening:
+                // Read the app and the text around the cursor while the user talks, so it's ready by the end.
+                _context = Settings.AppStyle || Settings.ScreenContext
+                    ? GrokVoice.Context.AppAwareness.CaptureAsync(_sink.Keyboard.Target, Settings.ScreenContext)
+                    : null;
                 if (_diagnostics is { } diag) _mic.BeginRaw(Path.Combine(diag, "device.wav"));
                 _sessionStart = _clock.Elapsed;
                 _sessionPeak = 0;
