@@ -51,6 +51,7 @@ internal sealed class DictationHost : IDisposable
         _sink = new RoutingTextSink(keyboard, Bot, Polisher.PolishAsync);
 
         // Before the controller, which opens the microphone straight away when it's kept warm.
+        _mic.DeviceId = Settings.MicrophoneId is { Length: > 0 } micId ? micId : null;
         _mic.Faulted += m => _ui.TryEnqueue(() => OnFailed(m));
         _mic.LevelChanged += OnLevel;
 
@@ -150,6 +151,21 @@ internal sealed class DictationHost : IDisposable
         {
             Settings.RightAltEnabled = value;
             _hook.RightAltEnabled = value;
+        }
+    }
+
+    /// <summary>The chosen microphone's id, or empty for Windows' default. Takes effect straight away.</summary>
+    public string MicrophoneId
+    {
+        get => Settings.MicrophoneId;
+        set
+        {
+            Settings.MicrophoneId = value;
+            _mic.DeviceId = value.Length == 0 ? null : value;
+            if (_controller.Status != DictationStatus.Idle) return;
+            var wasRunning = _mic.IsRunning;
+            _mic.Stop();
+            if (wasRunning) _mic.Start();
         }
     }
 

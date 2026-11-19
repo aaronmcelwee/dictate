@@ -71,6 +71,7 @@ public sealed partial class MainWindow : Window
         RightAltSwitch.IsOn = _host.RightAltEnabled;
         PolishSwitch.IsOn = _host.Settings.PolishEnabled;
         RestingSwitch.IsOn = _host.RestingPill;
+        ShowMicrophones();
         ShowUsage();
         _host.Usage.Changed += () => DispatcherQueue.TryEnqueue(ShowUsage);
         ShowDictionary();
@@ -398,6 +399,22 @@ public sealed partial class MainWindow : Window
     {
         if (_loading || LanguageBox.SelectedItem is not ComboBoxItem { Tag: string code }) return;
         _host.Settings.Language = code;
+    }
+
+    private void ShowMicrophones()
+    {
+        MicBox.Items.Clear();
+        MicBox.Items.Add(new ComboBoxItem { Content = "Windows default", Tag = "" });
+        foreach (var (id, name) in GrokVoice.Platform.MicrophoneSource.Devices())
+            MicBox.Items.Add(new ComboBoxItem { Content = name, Tag = id });
+        var current = _host.MicrophoneId;
+        MicBox.SelectedIndex = Math.Max(0, MicBox.Items.Cast<ComboBoxItem>().ToList().FindIndex(i => (string)i.Tag == current));
+    }
+
+    private void MicBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || MicBox.SelectedItem is not ComboBoxItem { Tag: string id }) return;
+        if (id != _host.MicrophoneId) _host.MicrophoneId = id;
     }
 
     private void RestingSwitch_Toggled(object sender, RoutedEventArgs e)

@@ -29,6 +29,21 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
     /// <summary>The microphone could not be opened or stopped unexpectedly.</summary>
     public event Action<string>? Faulted;
 
+    /// <summary>The capture device to use, or null for Windows' default multimedia microphone. Applies from the next Start.</summary>
+    public string? DeviceId { get; set; }
+
+    /// <summary>Active microphones, by id and name.</summary>
+    public static IReadOnlyList<(string Id, string Name)> Devices()
+    {
+        try
+        {
+            using var devices = new MMDeviceEnumerator();
+            return devices.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
+                .Select(d => (d.ID, d.FriendlyName)).ToList();
+        }
+        catch (Exception) { return []; }
+    }
+
     /// <summary>The device and format in use, for diagnostics; empty until the microphone has opened.</summary>
     public string Description { get; private set; } = "";
 
@@ -46,7 +61,13 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
             try
             {
                 using var devices = new MMDeviceEnumerator();
-                var device = devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+                MMDevice? device = null;
+                if (DeviceId is { Length: > 0 } id)
+                {
+                    try { device = devices.GetDevice(id); if (device.State != DeviceState.Active) device = null; }
+                    catch (Exception) { device = null; }
+                }
+                device ??= devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
                 capture = new WasapiCapture(device, useEventSync: true, audioBufferMillisecondsLength: 50);
                 var format = capture.WaveFormat;
                 _queue = new FloatQueue(format.SampleRate);

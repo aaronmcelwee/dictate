@@ -104,6 +104,14 @@
                     <ToggleSwitch x:Name="WarmMicSwitch" Toggled="WarmMicSwitch_Toggled" />
                 </tk:SettingsCard>
 
+                <tk:SettingsCard Header="Microphone"
+                                 Description="Which microphone Grok Voice listens to. A built-in laptop mic sounds muffled with the lid closed; pick a headset or webcam mic then.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE720;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <ComboBox x:Name="MicBox" MinWidth="220" MaxWidth="320" SelectionChanged="MicBox_SelectionChanged" />
+                </tk:SettingsCard>
+
                 <tk:SettingsCard Header="Microphone privacy" Description="Choose which microphone Windows uses, and allow Grok Voice to use it."
                                  IsClickEnabled="True" Click="MicPrivacy_Click">
                     <tk:SettingsCard.HeaderIcon>

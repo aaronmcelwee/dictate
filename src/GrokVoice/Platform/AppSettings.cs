@@ -51,6 +51,13 @@ internal sealed class AppSettings
         set => _values[nameof(PolishEnabled)] = value;
     }
 
+    /// <summary>The microphone's device id, or empty for Windows' default.</summary>
+    public string MicrophoneId
+    {
+        get => Get(nameof(MicrophoneId), "");
+        set => _values[nameof(MicrophoneId)] = value;
+    }
+
     /// <summary>Whether a thin capsule stays at the bottom of the screen while idle.</summary>
     public bool RestingPill
     {
