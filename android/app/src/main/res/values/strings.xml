@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Grok Voice</string>
-    <string name="a11y_description">Lets Grok Voice see whether a text box has the keyboard open and type your dictation into it. Test build: it types a fixed test line.</string>
+    <string name="a11y_description">Lets Grok Voice see whether a text box has the keyboard open and type your dictation into it. Optional: without it, dictation is copied to the clipboard instead.</string>
 </resources>
