@@ -20,13 +20,13 @@ public sealed partial class RecordingPill : Window
     /// <summary>What the pill is listening for, which sets its badge.</summary>
     public enum ListenMode { Cursor, HandsFree, Bot }
 
-    private const double HeightDip = 36;
+    private const double HeightDip = 32;
     private const double MaxReplyHeightDip = 420;
     private const double BottomMarginDip = 28;
     private const double MaxWidthDip = 400;
     private const double ReplyWidthDip = 460;
     private const int BarCount = 11;
-    private static readonly Windows.Foundation.Size RestSize = new(46, 8);
+    private static readonly Windows.Foundation.Size RestSize = new(40, 6);
     private static readonly Windows.UI.Color PillColor = Windows.UI.Color.FromArgb(255, 18, 18, 18);
     private static readonly Windows.UI.Color RestColor = Windows.UI.Color.FromArgb(255, 64, 64, 64);
     private static readonly TimeSpan ResizeTime = TimeSpan.FromMilliseconds(180);
@@ -190,7 +190,7 @@ public sealed partial class RecordingPill : Window
         BodyScroll.Visibility = Visibility.Collapsed;
         Body.VerticalAlignment = VerticalAlignment.Center;
         Body.Margin = new Thickness(0);
-        Present(nearWindow, new(Badge.Visibility == Visibility.Visible ? 128 : 96, HeightDip));
+        Present(nearWindow, new(Badge.Visibility == Visibility.Visible ? 120 : 88, HeightDip));
     }
 
     /// <summary>Live text isn't shown: the pill stays a waveform, like a recording light.</summary>
@@ -203,7 +203,7 @@ public sealed partial class RecordingPill : Window
         // Fast attack, slow release, with quiet speech still visible.
         _level = Math.Max(Math.Min(1f, peak * 3f), _level * 0.8f);
         for (var i = 0; i < BarCount; i++)
-            _barTarget[i] = 3 + 17 * _level * _envelope[i] * (0.6 + 0.4 * _random.NextDouble());
+            _barTarget[i] = 3 + 13 * _level * _envelope[i] * (0.6 + 0.4 * _random.NextDouble());
     }
 
     public void ShowTranscribing()
@@ -300,7 +300,7 @@ public sealed partial class RecordingPill : Window
     private static Border MyTurn(string text) => new()
     {
         HorizontalAlignment = HorizontalAlignment.Right,
-        MaxWidth = (ReplyWidthDip - 12 - 14 - 8) * 0.8,
+        MaxWidth = (ReplyWidthDip - 14 - 14 - 8) * 0.8,
         Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 42, 42, 46)),
         CornerRadius = new CornerRadius(12, 12, 4, 12),
         Padding = new Thickness(10, 6, 10, 7),
@@ -355,7 +355,7 @@ public sealed partial class RecordingPill : Window
     {
         // Padding, header row, gap, conversation, padding, and slack so the last line never clips.
         const double frame = 14 + 24 + 10 + 14 + 4;
-        Turns.Measure(new(ReplyWidthDip - 12 - 14, double.PositiveInfinity));
+        Turns.Measure(new(ReplyWidthDip - 14 - 14, double.PositiveInfinity));
         var height = Math.Clamp(frame + Turns.DesiredSize.Height, HeightDip, MaxReplyHeightDip);
         BodyScroll.MaxHeight = height - frame;
         Body.VerticalAlignment = VerticalAlignment.Top;
@@ -389,7 +389,7 @@ public sealed partial class RecordingPill : Window
         if (!_onScreen) return;
         // Shrink and fade, then park off screen (see Animate).
         _hiding = true;
-        Resize(new(56, HeightDip));
+        Resize(new(48, HeightDip));
     }
 
     private bool _resting;
@@ -480,7 +480,7 @@ public sealed partial class RecordingPill : Window
             Body.Margin = new Thickness(0);
             _measure.Text = title;
             _measure.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
-            size = new(Math.Clamp(_measure.DesiredSize.Width + 12 + 24 + 10 + 14 + 6, 120, MaxWidthDip), HeightDip);
+            size = new(Math.Clamp(_measure.DesiredSize.Width + 14 + 24 + 10 + 14 + 6, 112, MaxWidthDip), HeightDip);
         }
         Present(nearWindow, size);
         _hideTimer.Interval = showFor;
@@ -509,7 +509,7 @@ public sealed partial class RecordingPill : Window
         if (!_onScreen)
         {
             Locate(nearWindow);
-            _size = new(56, HeightDip);
+            _size = new(48, HeightDip);
             _onScreen = true;
             Apply(_size, topmost: true);
         }
@@ -650,7 +650,7 @@ public sealed partial class RecordingPill : Window
         Root.Margin = new Thickness(0, 0, 0, lift / _scale);
         var x = left + (boxW - width) / 2;
         var y = top + boxH - height - (int)Math.Round(lift);
-        var radius = Math.Min(size.Height / 2, 18);
+        var radius = Math.Min(size.Height / 2, 16);
         var d = (int)Math.Round(radius * 2 * _scale);
         SetWindowRgn(_hwnd, CreateRoundRectRgn(x, y, x + width + 1, y + height + 1, d, d), true);
     }

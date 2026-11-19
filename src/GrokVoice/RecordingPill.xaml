@@ -9,7 +9,7 @@
     <!-- Shell is the window's content and is clipped by the window region; Root is the pill inside it.
          Animations resize Root and the region only, not the window, so nothing shifts frame to frame. -->
     <Grid x:Name="Shell" Background="#FF121212">
-    <Border x:Name="Root" Background="#FF121212" Padding="12,0,14,0" HorizontalAlignment="Center" VerticalAlignment="Bottom">
+    <Border x:Name="Root" Background="#FF121212" Padding="14,0,14,0" HorizontalAlignment="Center" VerticalAlignment="Bottom">
         <Grid x:Name="Body" ColumnSpacing="10" VerticalAlignment="Center" Opacity="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -40,12 +40,12 @@
             </Grid>
 
             <!-- Waveform: bars that follow the voice, centred. -->
-            <StackPanel x:Name="Wave" Grid.Column="1" Orientation="Horizontal" Spacing="3"
-                        HorizontalAlignment="Center" VerticalAlignment="Center" Height="20" />
+            <StackPanel x:Name="Wave" Grid.Column="1" Orientation="Horizontal" Spacing="2.5"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Height="16" />
 
             <!-- Title: a short message, or who is talking in a conversation card. -->
             <StackPanel x:Name="Message" Grid.Column="1" VerticalAlignment="Center" Visibility="Collapsed">
-                <TextBlock x:Name="TitleText" FontSize="14" FontWeight="SemiBold" Foreground="White"
+                <TextBlock x:Name="TitleText" FontSize="13" FontWeight="SemiBold" Foreground="White"
                            TextTrimming="CharacterEllipsis" MaxLines="1" VerticalAlignment="Center" />
             </StackPanel>
 
