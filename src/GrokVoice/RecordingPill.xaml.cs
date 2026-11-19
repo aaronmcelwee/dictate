@@ -615,14 +615,20 @@ public sealed partial class RecordingPill : Window
     /// <summary>How far the client area (where XAML draws) sits inside the window, in pixels.</summary>
     private (int Left, int Top, int Right, int Bottom) FrameInsets()
     {
-        if (!GetWindowRect(_hwnd, out var window) || !GetClientRect(_hwnd, out var client)) return (0, 0, 0, 0);
-        var origin = new POINT();
-        if (!ClientToScreen(_hwnd, ref origin)) return (0, 0, 0, 0);
-        var left = Math.Max(0, origin.X - window.Left);
-        var top = Math.Max(0, origin.Y - window.Top);
-        var right = Math.Max(0, window.Right - (origin.X + client.Right));
-        var bottom = Math.Max(0, window.Bottom - (origin.Y + client.Bottom));
-        return (left, top, right, bottom);
+        if (!GetWindowRect(_hwnd, out var window)) return (0, 0, 0, 0);
+        // The XAML content lives in a child window; use its bounds, else the client area's.
+        RECT content;
+        var bridge = FindWindowEx(_hwnd, IntPtr.Zero, "Microsoft.UI.Content.DesktopChildSiteBridge", null);
+        if (bridge == IntPtr.Zero || !GetWindowRect(bridge, out content))
+        {
+            if (!GetClientRect(_hwnd, out var client)) return (0, 0, 0, 0);
+            var origin = new POINT();
+            if (!ClientToScreen(_hwnd, ref origin)) return (0, 0, 0, 0);
+            content = new RECT { Left = origin.X, Top = origin.Y, Right = origin.X + client.Right, Bottom = origin.Y + client.Bottom };
+        }
+        if (content.Right <= content.Left || content.Bottom <= content.Top) return (0, 0, 0, 0);
+        return (Math.Max(0, content.Left - window.Left), Math.Max(0, content.Top - window.Top),
+                Math.Max(0, window.Right - content.Right), Math.Max(0, window.Bottom - content.Bottom));
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -633,6 +639,9 @@ public sealed partial class RecordingPill : Window
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? className, string? title);
 
     [DllImport("user32.dll")]
     private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
