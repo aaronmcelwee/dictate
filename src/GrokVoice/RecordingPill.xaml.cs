@@ -85,6 +85,7 @@ public sealed partial class RecordingPill : Window
         var noBorder = DWMWA_COLOR_NONE;
         DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref noBorder, sizeof(int));
         SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        SuppressFrame();
 
         for (var i = 0; i < BarCount; i++)
         {
@@ -605,6 +606,21 @@ public sealed partial class RecordingPill : Window
             width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW | (topmost ? 0 : SWP_NOZORDER));
         var d = (int)Math.Round(radius * 2 * _scale);
         SetWindowRgn(_hwnd, CreateRoundRectRgn(0, 0, width + 1, height + 1, d, d), true);
+        if (topmost) SuppressFrame();
+    }
+
+    /// <summary>
+    /// Windows 11 draws a light, anti-aliased frame line along a window's shape (including a region's
+    /// rounded ends). Turn off DWM's non-client drawing altogether, and the border colour with it.
+    /// </summary>
+    private void SuppressFrame()
+    {
+        var disabled = DWMNCRP_DISABLED;
+        DwmSetWindowAttribute(_hwnd, DWMWA_NCRENDERING_POLICY, ref disabled, sizeof(int));
+        var noBorder = DWMWA_COLOR_NONE;
+        DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref noBorder, sizeof(int));
+        var corners = DWMWCP_DONOTROUND;
+        DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corners, sizeof(int));
     }
 
     // Far off every monitor, still "visible" to Windows so bringing it back is only a move.
@@ -630,6 +646,8 @@ public sealed partial class RecordingPill : Window
     private const nint WS_EX_TOOLWINDOW = 0x00000080;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_NCRENDERING_POLICY = 2;
+    private const int DWMNCRP_DISABLED = 1;
     private const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
     private const int DWMWCP_DONOTROUND = 1;
     private const uint MONITOR_DEFAULTTOPRIMARY = 1;
