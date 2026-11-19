@@ -99,9 +99,43 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
         capture?.StopRecording();
     }
 
+    private WaveFileWriter? _raw;
+
+    /// <summary>Starts keeping the device's own stream, unconverted, in <paramref name="path"/> (diagnostics).</summary>
+    public void BeginRaw(string path)
+    {
+        lock (_gate)
+        {
+            EndRawLocked();
+            if (_capture is null) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                _raw = new WaveFileWriter(path, _capture.WaveFormat);
+            }
+            catch (Exception) { _raw = null; }
+        }
+    }
+
+    public void EndRaw()
+    {
+        lock (_gate) EndRawLocked();
+    }
+
+    private void EndRawLocked()
+    {
+        try { _raw?.Dispose(); } catch (Exception) { }
+        _raw = null;
+    }
+
     private void OnData(object? sender, WaveInEventArgs e)
     {
         if (e.BytesRecorded == 0 || sender is not WasapiCapture capture) return;
+        lock (_gate)
+        {
+            try { _raw?.Write(e.Buffer, 0, e.BytesRecorded); }
+            catch (Exception) { EndRawLocked(); }
+        }
         var queue = _queue;
         var resampler = _resampler;
         if (queue is null || resampler is null) return;

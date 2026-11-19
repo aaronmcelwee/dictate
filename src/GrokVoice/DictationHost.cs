@@ -440,6 +440,7 @@ internal sealed class DictationHost : IDisposable
         switch (status)
         {
             case DictationStatus.Listening:
+                if (_diagnostics is { } diag) _mic.BeginRaw(Path.Combine(diag, "device.wav"));
                 _sessionStart = _clock.Elapsed;
                 _sessionPeak = 0;
                 if (_owner == KeySource.Copilot || _altMachine.State is DictationState.PushToTalk or DictationState.HandsFree)
@@ -447,9 +448,11 @@ internal sealed class DictationHost : IDisposable
                 if (_owner == KeySource.Copilot) _pill.ShowAvatar(BotAvatarClip);
                 break;
             case DictationStatus.Transcribing:
+                _mic.EndRaw();
                 _pill.ShowTranscribing();
                 break;
             case DictationStatus.Idle:
+                _mic.EndRaw();
                 _pill.HideUnlessShowingError();
                 ReleaseOwnerIfDone();
                 break;
