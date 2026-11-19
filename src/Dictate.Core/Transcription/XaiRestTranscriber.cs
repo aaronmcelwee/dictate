@@ -89,8 +89,6 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
             fields.Add([name, value]);
         }
         Field("model", options.Model);
-        Field("audio_format", "pcm");
-        Field("sample_rate", options.SampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (!string.IsNullOrEmpty(options.Language))
         {
             Field("language", options.Language);
@@ -101,9 +99,12 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
         Field("vad_threshold", "0");
         foreach (var term in (keyterms ?? []).Where(t => t.Length is > 0 and <= 50).Distinct(StringComparer.OrdinalIgnoreCase).Take(100))
             Field("keyterm", term);
-        var file = new ByteArrayContent(audio);
-        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        form.Add(file, "file", "dictation.pcm");
+        // A WAV file carries its own sample rate and format, so nothing about the audio is left to
+        // the server to assume.
+        var file = new ByteArrayContent(Wav(audio, options.SampleRate));
+        file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+        form.Add(file, "file", "dictation.wav");
+        fields.Add(["file", $"dictation.wav (audio/wav, {options.SampleRate} Hz mono 16-bit)"]);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint) { Content = form };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
@@ -188,6 +189,20 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
             ["dc_offset"] = Math.Round(sum / n, 1),
             ["treble_ratio"] = Math.Round(total > 0 ? hf / total : 0, 4),
         };
+    }
+
+    /// <summary>16-bit mono PCM wrapped in a WAV header.</summary>
+    public static byte[] Wav(byte[] pcm, int sampleRate)
+    {
+        using var stream = new MemoryStream(44 + pcm.Length);
+        using (var w = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true))
+        {
+            w.Write("RIFF"u8); w.Write(36 + pcm.Length); w.Write("WAVE"u8);
+            w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1);
+            w.Write(sampleRate); w.Write(sampleRate * 2); w.Write((short)2); w.Write((short)16);
+            w.Write("data"u8); w.Write(pcm.Length); w.Write(pcm);
+        }
+        return stream.ToArray();
     }
 
     /// <summary>Keeps the last clip as a WAV file so a bad transcript can be checked against what was recorded.</summary>

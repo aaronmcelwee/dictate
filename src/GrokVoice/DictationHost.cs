@@ -255,7 +255,9 @@ internal sealed class DictationHost : IDisposable
         if (SetupNeeded is { } setup) throw new TranscriptionException(setup);
         // The whole clip in one request: a short pause after letting go, for better accuracy than streaming.
         _diagnostics = NewDiagnosticsFolder();
-        return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, Words.Keyterms(),
+        // No key terms for now: a hundred of them from the imported dictionary can pull the recognizer
+        // towards unrelated words. The clean-up pass still uses the dictionary.
+        return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, null,
             Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "last-dictation.wav"))
         {
             Billed = (model, seconds) => Usage.AddTranscription(model, seconds),
