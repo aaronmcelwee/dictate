@@ -52,6 +52,11 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
         // Quiet microphones lose consonants to the recognizer: bring the loudest moment up to -3 dBFS.
         var gain = Normalize(audio);
         diag["gain_db"] = Math.Round(20 * Math.Log10(gain), 1);
+        if (options.PadSeconds > 0)
+        {
+            var pad = new byte[(int)(options.PadSeconds * options.SampleRate) * 2];
+            audio = [.. pad, .. audio, .. pad];
+        }
         diag["audio_sent"] = Stats(audio, options.SampleRate);
         var fields = new List<string[]>();
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -92,7 +97,7 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
         if (!string.IsNullOrEmpty(options.Language))
         {
             Field("language", options.Language);
-            Field("format", "true");
+            if (options.Format) Field("format", "true");
         }
         // The one-shot endpoint's voice gate defaults to 0.5, which drops quieter stretches of speech
         // and leaves fragments; streaming uses 0.08. Turn it off: the clip is all speech the user chose to record.

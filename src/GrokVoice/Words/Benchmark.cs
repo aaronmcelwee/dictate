@@ -27,7 +27,20 @@ internal static partial class Benchmark
     }
 
     private sealed record Row(string Id, string App, string Reference, bool Edited, string WisprAsr, string WisprFormatted,
-        string GrokHeard, string GrokCleaned, double Seconds, string? Error);
+        string GrokHeard, string GrokCleaned, double Seconds, string? Error)
+    {
+        /// <summary>What other speech-to-text settings heard, by variant name.</summary>
+        public Dictionary<string, string> Variants { get; } = new();
+    }
+
+    /// <summary>Speech-to-text settings tried besides the app's own, to find the most accurate.</summary>
+    private static readonly (string Name, Func<XaiSttOptions, XaiSttOptions> Change, bool Keyterms)[] SttVariants =
+    [
+        ("unformatted", o => o with { Format = false }, false),
+        ("padded_1s", o => o with { PadSeconds = 1.0 }, false),
+        ("auto_language", o => o with { Language = "" }, false),
+        ("keyterms_40", o => o, true),
+    ];
 
     private static async Task RunAsync(string input, string output, Func<string?> apiKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
     {
@@ -54,6 +67,7 @@ internal static partial class Benchmark
                 wer_wispr_asr = Wer(r.WisprAsr, r.Reference), wer_wispr_formatted = Wer(r.WisprFormatted, r.Reference),
                 wer_grok_heard = Wer(r.GrokHeard, r.Reference), wer_grok_cleaned = Wer(r.GrokCleaned, r.Reference),
                 fer_wispr_formatted = Fer(r.WisprFormatted, r.Reference), fer_grok_cleaned = Fer(r.GrokCleaned, r.Reference),
+                variants = r.Variants.ToDictionary(v => v.Key, v => new { text = v.Value, wer = Wer(v.Value, r.Reference) }),
                 error = r.Error,
             }, options))).ConfigureAwait(false);
 
@@ -75,6 +89,7 @@ internal static partial class Benchmark
                         wispr_asr = Pooled(r => r.WisprAsr, Counts), wispr_formatted = Pooled(r => r.WisprFormatted, Counts),
                         grok_heard = Pooled(r => r.GrokHeard, Counts), grok_cleaned = Pooled(r => r.GrokCleaned, Counts),
                     },
+                    variant_wer_percent = SttVariants.ToDictionary(v => v.Name, v => Pooled(r => r.Variants.GetValueOrDefault(v.Name, ""), Counts)),
                     // Errors counting capitals and punctuation too: what the user would have to fix.
                     formatted_error_percent = new
                     {
@@ -130,6 +145,19 @@ internal static partial class Benchmark
             };
             await stt.SendAudioAsync(pcm, CancellationToken.None).ConfigureAwait(false);
             var heard = (await stt.FinishAsync(CancellationToken.None).ConfigureAwait(false)).Trim();
+            var variants = new Dictionary<string, string>();
+            foreach (var (name, change, useKeyterms) in SttVariants)
+            {
+                try
+                {
+                    await using var other = new XaiRestTranscriber(change(new XaiSttOptions { ApiKey = apiKey()!, Language = language }),
+                        useKeyterms ? words.Keyterms().Take(40).ToList() : null)
+                    { Billed = (model, s) => usage.AddTranscription(model, s) };
+                    await other.SendAudioAsync(pcm, CancellationToken.None).ConfigureAwait(false);
+                    variants[name] = (await other.FinishAsync(CancellationToken.None).ConfigureAwait(false)).Trim();
+                }
+                catch (Exception e) { variants[name] = "ERROR: " + e.Message; }
+            }
 
             var kind = GrokVoice.Context.AppAwareness.Classify(app, app);
             var context = new GrokVoice.Context.DictationContext(app, app, kind, "benchmark", "", 0);
@@ -141,7 +169,9 @@ internal static partial class Benchmark
                 UseScreen = () => false,
             };
             var cleaned = heard.Length == 0 ? "" : await polisher.PolishAsync(heard, CancellationToken.None).ConfigureAwait(false);
-            return new Row(id, app, reference, edited.Trim().Length > 0 && edited != formatted, asr, formatted, heard, cleaned, seconds, null);
+            var row = new Row(id, app, reference, edited.Trim().Length > 0 && edited != formatted, asr, formatted, heard, cleaned, seconds, null);
+            foreach (var (k, v) in variants) row.Variants[k] = v;
+            return row;
         }
         catch (Exception e)
         {

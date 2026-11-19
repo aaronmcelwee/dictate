@@ -11,6 +11,10 @@ public sealed record XaiSttOptions
     /// <summary>Two-letter code; enables inverse text normalization (numbers, dates) on the server. Empty lets the server detect it.</summary>
     public string Language { get; init; } = "en";
     public int SampleRate { get; init; } = 16000;
+    /// <summary>One-shot endpoint: ask for formatted text (punctuation, numbers as digits). Only sent with a language.</summary>
+    public bool Format { get; init; } = true;
+    /// <summary>One-shot endpoint: silence added before and after the clip, in seconds.</summary>
+    public double PadSeconds { get; init; }
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan FinishTimeout { get; init; } = TimeSpan.FromSeconds(15);
 }
