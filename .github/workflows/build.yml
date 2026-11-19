@@ -21,8 +21,9 @@ jobs:
     strategy:
       matrix:
         platform: [x64, ARM64]
-        # Dictate is the full app; FlowKey is the Copilot Key Launcher, a small helper that opens a chosen app.
-        project: [Dictate, FlowKey]
+        # Dictate is the full app; FlowKey is the Copilot Key Launcher, a small helper that opens a chosen app;
+        # GrokVoice is Right Alt dictation plus Copilot key instructions for Grok Bot.
+        project: [Dictate, FlowKey, GrokVoice]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -59,10 +60,11 @@ jobs:
             /p:GenerateAppxPackageOnBuild=true /p:AppxPackageDir="$PWD\out\" `
             /p:AppxPackageSigningEnabled=true /p:PackageCertificateThumbprint=$env:SIGNING_THUMBPRINT
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item scripts\${{ matrix.project == 'FlowKey' && 'Install-FlowKey.ps1' || 'Install.ps1' }} out\
+          $script = @{ Dictate = 'Install.ps1'; FlowKey = 'Install-FlowKey.ps1'; GrokVoice = 'Install-GrokVoice.ps1' }['${{ matrix.project }}']
+          Copy-Item scripts\$script out\
           Get-ChildItem -Recurse out | Select-Object FullName
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.project == 'FlowKey' && 'flowkey' || 'dictate' }}-${{ matrix.platform }}
+          name: ${{ matrix.project == 'FlowKey' && 'flowkey' || matrix.project == 'GrokVoice' && 'grokvoice' || 'dictate' }}-${{ matrix.platform }}
           path: out/

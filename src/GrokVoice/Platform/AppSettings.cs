@@ -1,0 +1,45 @@
+using Windows.Foundation.Collections;
+using Windows.Storage;
+
+namespace GrokVoice.Platform;
+
+/// <summary>Small preferences, stored per user in the package's local settings.</summary>
+internal sealed class AppSettings
+{
+    private readonly IPropertySet _values = ApplicationData.Current.LocalSettings.Values;
+
+    public bool KeepMicWarm
+    {
+        get => Get(nameof(KeepMicWarm), true);
+        set => _values[nameof(KeepMicWarm)] = value;
+    }
+
+    /// <summary>Whether Right Alt dictates at the cursor.</summary>
+    public bool RightAltEnabled
+    {
+        get => Get(nameof(RightAltEnabled), true);
+        set => _values[nameof(RightAltEnabled)] = value;
+    }
+
+    /// <summary>The Grok Bot that Copilot key instructions go to: its id and name, empty until chosen.</summary>
+    public string BotId
+    {
+        get => Get(nameof(BotId), "");
+        set => _values[nameof(BotId)] = value;
+    }
+
+    public string BotName
+    {
+        get => Get(nameof(BotName), "");
+        set => _values[nameof(BotName)] = value;
+    }
+
+    /// <summary>Two-letter language code for Grok, or empty to auto-detect.</summary>
+    public string Language
+    {
+        get => Get(nameof(Language), "en");
+        set => _values[nameof(Language)] = value;
+    }
+
+    private T Get<T>(string key, T fallback) => _values.TryGetValue(key, out var v) && v is T t ? t : fallback;
+}
