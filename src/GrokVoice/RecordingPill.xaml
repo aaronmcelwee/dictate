@@ -6,7 +6,10 @@
     Title="Grok Voice">
 
     <!-- A small dark capsule: just a live waveform while listening, growing to fit a message. -->
-    <Border x:Name="Root" Background="#FF121212" Padding="12,0,14,0">
+    <!-- Shell is the window's content and is clipped by the window region; Root is the pill inside it.
+         Animations resize Root and the region only, not the window, so nothing shifts frame to frame. -->
+    <Grid x:Name="Shell" Background="#FF121212">
+    <Border x:Name="Root" Background="#FF121212" Padding="12,0,14,0" HorizontalAlignment="Center" VerticalAlignment="Bottom">
         <Grid x:Name="Body" ColumnSpacing="10" VerticalAlignment="Center" Opacity="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -53,4 +56,5 @@
             </ScrollViewer>
         </Grid>
     </Border>
+    </Grid>
 </Window>

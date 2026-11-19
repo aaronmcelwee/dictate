@@ -54,6 +54,9 @@ public sealed partial class RecordingPill : Window
     private double _scale = 1;
     private Windows.Graphics.RectInt32 _work;
     private Windows.Foundation.Size _size, _fromSize, _toSize;
+    // The window's own size (DIPs): during an animation it is the larger of the two ends.
+    private Windows.Foundation.Size _box;
+    private (int Left, int Top, int Right, int Bottom)? _insets;
     private double _resizeStart, _fadeStart;
 
     public RecordingPill()
@@ -419,7 +422,7 @@ public sealed partial class RecordingPill : Window
         {
             _size = RestSize;
             _onScreen = true;
-            Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(RestColor);
+            Paint(RestColor);
             Body.Opacity = 0;
             Apply(_size, topmost: true);
             return;
@@ -502,7 +505,7 @@ public sealed partial class RecordingPill : Window
     private void Present(IntPtr nearWindow, Windows.Foundation.Size size)
     {
         _hiding = false;
-        Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(PillColor);
+        Paint(PillColor);
         if (!_onScreen)
         {
             Locate(nearWindow);
@@ -536,6 +539,9 @@ public sealed partial class RecordingPill : Window
         _fromSize = _size;
         _toSize = size;
         _resizeStart = _clock.Elapsed.TotalMilliseconds;
+        // Size the window once to hold the whole animation; frames then only move the region.
+        var box = new Windows.Foundation.Size(Math.Max(_fromSize.Width, _toSize.Width), Math.Max(_fromSize.Height, _toSize.Height));
+        if (box != _box) Place(box, topmost: false);
         _frame.Start();
     }
 
@@ -549,7 +555,9 @@ public sealed partial class RecordingPill : Window
         var size = new Windows.Foundation.Size(
             _fromSize.Width + (_toSize.Width - _fromSize.Width) * e,
             _fromSize.Height + (_toSize.Height - _fromSize.Height) * e);
-        if (size != _size) Apply(size, topmost: false);
+        if (size != _size) Clip(size);
+        // Settle the window to the final size once the animation ends.
+        if (t >= 1 && _box != _toSize && !_hiding) Apply(_toSize, topmost: false);
 
         // Content fades in after a change, and out while hiding.
         var f = Math.Clamp((now - _fadeStart) / FadeTime.TotalMilliseconds, 0, 1);
@@ -583,33 +591,68 @@ public sealed partial class RecordingPill : Window
 
         if (_look == Look.Rest && t >= 1)
         {
-            Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(RestColor);
+            Paint(RestColor);
             _frame.Stop();
         }
         if (_look == Look.Message && t >= 1 && f >= 1) _frame.Stop();
     }
 
-    /// <summary>Sizes the window to <paramref name="size"/> DIPs, centred above the bottom of the work area, with a capsule-shaped region.</summary>
+    private void Paint(Windows.UI.Color color)
+    {
+        Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+        Shell.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+    }
+
+    /// <summary>Sizes the window and the pill to <paramref name="size"/> DIPs, centred above the bottom of the work area.</summary>
     private void Apply(Windows.Foundation.Size size, bool topmost)
     {
-        _size = size;
-        var width = (int)Math.Round(size.Width * _scale);
-        var height = (int)Math.Round(size.Height * _scale);
-        var radius = Math.Min(size.Height / 2, 18);
-        var bottom = BottomMarginDip + (HeightDip - Math.Min(size.Height, HeightDip)) / 2;
+        Place(size, topmost);
+        Clip(size);
+        if (topmost) SuppressFrame();
+    }
+
+    /// <summary>How far above the work area's bottom the pill sits; small sizes stay centred on the full-height line.</summary>
+    private static double BottomFor(Windows.Foundation.Size size) => BottomMarginDip + (HeightDip - Math.Min(size.Height, HeightDip)) / 2;
+
+    /// <summary>Moves and sizes the window itself to hold a <paramref name="box"/>-sized pill.</summary>
+    private void Place(Windows.Foundation.Size box, bool topmost)
+    {
+        _box = box;
+        var width = (int)Math.Round(box.Width * _scale);
+        var height = (int)Math.Round(box.Height * _scale);
         // The window region does the rounding. Rounding the XAML too leaves anti-aliased corners that
         // blend with the light window background underneath, which shows as a pale rim.
         Root.CornerRadius = new CornerRadius(0);
         // WinUI keeps a few pixels of window frame around the content, which Windows paints light.
-        // Size the window so the content itself is the pill, and clip the window to the content.
-        var (left, top, right, bottomInset) = FrameInsets();
+        // Size the window so the content itself is the box, and the region clips the frame away.
+        // Measure it only when the window is at rest: mid-animation the child window lags behind.
+        if (topmost || _insets is null || _insets == (0, 0, 0, 0)) _insets = FrameInsets();
+        var (left, top, right, bottomInset) = _insets.Value;
         SetWindowPos(_hwnd, topmost ? HWND_TOPMOST : IntPtr.Zero,
             _work.X + (_work.Width - width) / 2 - left,
-            _work.Y + _work.Height - height - (int)(bottom * _scale) - top,
+            _work.Y + _work.Height - height - (int)Math.Round(BottomFor(box) * _scale) - top,
             width + left + right, height + top + bottomInset, SWP_NOACTIVATE | SWP_SHOWWINDOW | (topmost ? 0 : SWP_NOZORDER));
+    }
+
+    /// <summary>Sizes the pill inside the window and clips the window to its capsule shape.</summary>
+    private void Clip(Windows.Foundation.Size size)
+    {
+        _size = size;
+        var (left, top, _, _) = _insets ?? (0, 0, 0, 0);
+        var boxW = (int)Math.Round(_box.Width * _scale);
+        var boxH = (int)Math.Round(_box.Height * _scale);
+        var width = Math.Min(boxW, (int)Math.Round(size.Width * _scale));
+        var height = Math.Min(boxH, (int)Math.Round(size.Height * _scale));
+        // Bottom-aligned in the box, lifted so small sizes stay centred on the same line as full-height ones.
+        var lift = Math.Clamp((BottomFor(size) - BottomFor(_box)) * _scale, 0, boxH - height);
+        Root.Width = width / _scale;
+        Root.Height = height / _scale;
+        Root.Margin = new Thickness(0, 0, 0, lift / _scale);
+        var x = left + (boxW - width) / 2;
+        var y = top + boxH - height - (int)Math.Round(lift);
+        var radius = Math.Min(size.Height / 2, 18);
         var d = (int)Math.Round(radius * 2 * _scale);
-        SetWindowRgn(_hwnd, CreateRoundRectRgn(left, top, left + width + 1, top + height + 1, d, d), true);
-        if (topmost) SuppressFrame();
+        SetWindowRgn(_hwnd, CreateRoundRectRgn(x, y, x + width + 1, y + height + 1, d, d), true);
     }
 
     /// <summary>How far the client area (where XAML draws) sits inside the window, in pixels.</summary>
