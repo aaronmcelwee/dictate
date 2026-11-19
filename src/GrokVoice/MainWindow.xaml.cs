@@ -295,7 +295,7 @@ public sealed partial class MainWindow : Window
         {
             SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary,
         };
-        foreach (var ext in new[] { ".mp4", ".webm", ".mov", ".gif" }) picker.FileTypeFilter.Add(ext);
+        foreach (var ext in new[] { ".mp4", ".webm", ".mov" }) picker.FileTypeFilter.Add(ext);
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync();
         if (file is null) return;
