@@ -34,6 +34,16 @@ internal sealed class AppSettings
         set => _values[nameof(BotName)] = value;
     }
 
+    /// <summary>A video clip of a bot's character for the pill, by bot id; empty when none.</summary>
+    public string AvatarClip(string botId) => botId.Length == 0 ? "" : Get("AvatarClip_" + botId, "");
+
+    public void SetAvatarClip(string botId, string? path)
+    {
+        if (botId.Length == 0) return;
+        if (string.IsNullOrEmpty(path)) _values.Remove("AvatarClip_" + botId);
+        else _values["AvatarClip_" + botId] = path;
+    }
+
     /// <summary>Two-letter language code for Grok, or empty to auto-detect.</summary>
     public string Language
     {

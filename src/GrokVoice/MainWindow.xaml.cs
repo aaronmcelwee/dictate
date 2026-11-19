@@ -192,6 +192,7 @@ public sealed partial class MainWindow : Window
         BotSignInButton.Content = _signIn is not null ? "Cancel" : signedIn ? "Sign out" : "Sign in";
         BotSignInButton.Style = !signedIn && _signIn is null ? (Style)Application.Current.Resources["AccentButtonStyle"] : null;
         BotBox.IsEnabled = signedIn;
+        ShowAvatarClip();
     }
 
     private void ShowBotError(string title, string message)
@@ -277,6 +278,36 @@ public sealed partial class MainWindow : Window
         if (_loading || BotBox.SelectedItem is not GrokVoice.Bot.GrokBot bot) return;
         _host.Bot.Choose(bot);
         ShowBotState();
+    }
+
+    private void ShowAvatarClip()
+    {
+        var id = _host.Settings.BotId;
+        var path = _host.Settings.AvatarClip(id);
+        AvatarCard.IsEnabled = id.Length > 0;
+        AvatarName.Text = path.Length > 0 ? Path.GetFileName(path) : "None";
+        AvatarRemoveButton.Visibility = path.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void AvatarChoose_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker
+        {
+            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary,
+        };
+        foreach (var ext in new[] { ".mp4", ".webm", ".mov", ".gif" }) picker.FileTypeFilter.Add(ext);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var file = await picker.PickSingleFileAsync();
+        if (file is null) return;
+        _host.Settings.SetAvatarClip(_host.Settings.BotId, file.Path);
+        _host.Write($"bot   character clip set to {file.Name}");
+        ShowAvatarClip();
+    }
+
+    private void AvatarRemove_Click(object sender, RoutedEventArgs e)
+    {
+        _host.Settings.SetAvatarClip(_host.Settings.BotId, null);
+        ShowAvatarClip();
     }
 
     private void RightAltSwitch_Toggled(object sender, RoutedEventArgs e)

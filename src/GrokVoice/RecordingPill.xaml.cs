@@ -63,11 +63,41 @@ public sealed partial class RecordingPill : Window
 
     public IntPtr Handle => _hwnd;
 
+    private string? _avatarPath;
+
+    /// <summary>
+    /// Plays the bot's character clip (muted, looping) in place of the icon, or goes back to the
+    /// icon when <paramref name="path"/> is null or missing.
+    /// </summary>
+    public void ShowAvatar(string? path)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            AvatarFrame.Visibility = Visibility.Collapsed;
+            Avatar.MediaPlayer?.Pause();
+            return;
+        }
+        if (path != _avatarPath || Avatar.MediaPlayer is null)
+        {
+            var player = Avatar.MediaPlayer ?? new Windows.Media.Playback.MediaPlayer();
+            player.IsMuted = true;
+            player.IsLoopingEnabled = true;
+            player.Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(path));
+            if (Avatar.MediaPlayer is null) Avatar.SetMediaPlayer(player);
+            _avatarPath = path;
+        }
+        MicGlyph.Visibility = Visibility.Collapsed;
+        BotGlyph.Visibility = Visibility.Collapsed;
+        AvatarFrame.Visibility = Visibility.Visible;
+        Avatar.MediaPlayer!.Play();
+    }
+
     /// <summary>Shows the pill at the bottom of the screen that holds <paramref name="nearWindow"/>.</summary>
     public void ShowListening(IntPtr nearWindow, string label)
     {
         _hideTimer.Stop();
         BotGlyph.Visibility = Visibility.Collapsed;
+        ShowAvatar(null);
         ModeText.Text = label;
         TranscriptText.Text = "";
         Busy.IsActive = false;
@@ -104,6 +134,7 @@ public sealed partial class RecordingPill : Window
         MicGlyph.Visibility = Visibility.Collapsed;
         ErrorGlyph.Visibility = Visibility.Visible;
         LevelHalo.Visibility = Visibility.Collapsed;
+        ShowAvatar(null);
         ModeText.Text = "Grok Voice";
         TranscriptText.Text = message;
         if (!_onScreen) Place(nearWindow);
@@ -149,6 +180,7 @@ public sealed partial class RecordingPill : Window
         _hideTimer.Stop();
         Busy.IsActive = false;
         BotGlyph.Visibility = Visibility.Collapsed;
+        ShowAvatar(null);
         _level = 0;
         Park();
     }

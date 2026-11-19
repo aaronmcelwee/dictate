@@ -359,6 +359,7 @@ internal sealed class DictationHost : IDisposable
                 _sessionPeak = 0;
                 if (_owner == KeySource.Copilot || _altMachine.State is DictationState.PushToTalk or DictationState.HandsFree)
                     _pill.ShowListening(_sink.Keyboard.Target, ListeningLabel);
+                if (_owner == KeySource.Copilot) _pill.ShowAvatar(BotAvatarClip);
                 break;
             case DictationStatus.Transcribing:
                 _pill.ShowTranscribing();
@@ -376,7 +377,11 @@ internal sealed class DictationHost : IDisposable
     private void OnInserted(string text)
     {
         LastText = text;
-        if (_sink.Current == DictationTarget.Bot) _pill.ShowInfo($"Sent to {Bot.BotName ?? "your bot"}", _sink.Keyboard.Target);
+        if (_sink.Current == DictationTarget.Bot)
+        {
+            _pill.ShowInfo($"Sent to {Bot.BotName ?? "your bot"}", _sink.Keyboard.Target);
+            _pill.ShowAvatar(BotAvatarClip);
+        }
         Write($"{(_sink.Current == DictationTarget.Bot ? "sent" : "typed")} {text.Length} chars, {(_clock.Elapsed - _sessionStart).TotalMilliseconds:0} ms after start");
         Inserted?.Invoke(text);
     }
@@ -387,7 +392,10 @@ internal sealed class DictationHost : IDisposable
         // Never cover a dictation in progress; the reply is in Grok Bot either way.
         if (_controller.Status != DictationStatus.Idle) return;
         _pill.ShowReply(botName, reply, _sink.Keyboard.Target);
+        _pill.ShowAvatar(BotAvatarClip);
     }
+
+    private string? BotAvatarClip => Settings.AvatarClip(Settings.BotId) is { Length: > 0 } path ? path : null;
 
     private void OnFailed(string message)
     {

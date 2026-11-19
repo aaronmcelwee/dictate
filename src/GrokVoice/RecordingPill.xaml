@@ -26,6 +26,10 @@
                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
             <FontIcon x:Name="BotGlyph" Glyph="&#xE99A;" FontSize="16" Visibility="Collapsed"
                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+            <!-- A looping clip of the bot's character, when one has been chosen in settings. -->
+            <Border x:Name="AvatarFrame" Width="32" Height="32" CornerRadius="16" Visibility="Collapsed">
+                <MediaPlayerElement x:Name="Avatar" Stretch="UniformToFill" AreTransportControlsEnabled="False" />
+            </Border>
             <ProgressRing x:Name="Busy" Width="28" Height="28" IsActive="False" />
         </Grid>
 

@@ -157,6 +157,16 @@
                                 </Button>
                             </StackPanel>
                         </tk:SettingsCard>
+                        <tk:SettingsCard x:Name="AvatarCard" Header="Character clip"
+                                         Description="A short video of the bot's character. The pill plays it, muted and looping, while you talk to the bot and when it replies.">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock x:Name="AvatarName" VerticalAlignment="Center" MaxWidth="200"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Button x:Name="AvatarChooseButton" Content="Choose…" Click="AvatarChoose_Click" />
+                                <Button x:Name="AvatarRemoveButton" Content="Remove" Click="AvatarRemove_Click" />
+                            </StackPanel>
+                        </tk:SettingsCard>
                     </tk:SettingsExpander.Items>
                 </tk:SettingsExpander>
                 <InfoBar x:Name="BotBar" IsClosable="True" />
