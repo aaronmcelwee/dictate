@@ -451,7 +451,7 @@ public sealed partial class RecordingPill : Window
 
     private const int GWL_EXSTYLE = -20;
     private const int GWL_STYLE = -16;
-    private const nint WS_POPUP = unchecked((nint)0x80000000L);
+    private static readonly nint WS_POPUP = unchecked((nint)0x80000000L);
     private const nint WS_CAPTION = 0x00C00000;
     private const nint WS_BORDER = 0x00800000;
     private const nint WS_DLGFRAME = 0x00400000;
