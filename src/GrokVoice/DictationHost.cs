@@ -239,7 +239,8 @@ internal sealed class DictationHost : IDisposable
     {
         if (SetupNeeded is { } setup) throw new TranscriptionException(setup);
         // The whole clip in one request: a short pause after letting go, for better accuracy than streaming.
-        return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, Words.Keyterms());
+        return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, Words.Keyterms(),
+            Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "last-dictation.wav"));
     }
 
     private void OnAltGesture(KeyEvent e)

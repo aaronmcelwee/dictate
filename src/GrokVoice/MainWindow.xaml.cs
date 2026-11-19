@@ -55,7 +55,8 @@ public sealed partial class MainWindow : Window
         _host.StatusChanged += OnStatus;
         // Escape belongs to Grok Voice only during hands-free dictation.
         _host.CancelAvailableChanged += available => _escape.Enabled = available;
-        _host.Inserted += text => LastText.Text = text;
+        _host.Inserted += text => LastText.Text = _host.Polisher.LastRaw is { Length: > 0 } raw && raw != text
+            ? $"{text}\n\nAs heard, before clean-up:\n{raw}" : text;
         _host.Failed += message =>
         {
             ErrorBar.Message = message;

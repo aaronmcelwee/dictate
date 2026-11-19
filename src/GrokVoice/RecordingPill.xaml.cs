@@ -21,9 +21,10 @@ public sealed partial class RecordingPill : Window
     public enum ListenMode { Cursor, HandsFree, Bot }
 
     private const double HeightDip = 36;
-    private const double ReplyHeightDip = 60;
+    private const double MaxReplyHeightDip = 420;
     private const double BottomMarginDip = 28;
     private const double MaxWidthDip = 400;
+    private const double ReplyWidthDip = 460;
     private const int BarCount = 11;
     private static readonly TimeSpan ResizeTime = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan FadeTime = TimeSpan.FromMilliseconds(140);
@@ -73,6 +74,9 @@ public sealed partial class RecordingPill : Window
         // The capsule shape comes from a window region, so Windows must not add its own corners.
         var corners = DWMWCP_DONOTROUND;
         DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corners, sizeof(int));
+        // No light frame line around the capsule.
+        var noBorder = DWMWA_COLOR_NONE;
+        DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref noBorder, sizeof(int));
 
         for (var i = 0; i < BarCount; i++)
         {
@@ -101,6 +105,14 @@ public sealed partial class RecordingPill : Window
         AppWindow.Closing += (_, e) => e.Cancel = true;
 
         Root.Tapped += (_, _) => Clicked?.Invoke();
+        // Reading a reply: keep it up while the pointer is over it, then give a few more seconds.
+        Root.PointerEntered += (_, _) => { if (_look == Look.Message) _hideTimer.Stop(); };
+        Root.PointerExited += (_, _) =>
+        {
+            if (_look != Look.Message || !_onScreen || _hiding) return;
+            _hideTimer.Interval = TimeSpan.FromSeconds(4);
+            _hideTimer.Start();
+        };
 
         Park();
         ShowWindow(_hwnd, SW_SHOWNOACTIVATE);
@@ -173,7 +185,7 @@ public sealed partial class RecordingPill : Window
 
     public void ShowError(string message, IntPtr nearWindow)
     {
-        ShowMessage("Grok Voice", message, "\uE783", nearWindow, TimeSpan.FromSeconds(5));
+        ShowMessage("Grok Voice", message, "\uE783", nearWindow, TimeSpan.FromSeconds(6));
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 153, 164));
     }
 
@@ -187,8 +199,7 @@ public sealed partial class RecordingPill : Window
         // "Jeeves · Chief of Staff" reads as "Jeeves" in the pill.
         var name = botName.Split(" · ")[0].Trim();
         var plain = MarkdownInlines.ToPlain(reply);
-        ShowMessage(name, plain, "\uE99A", nearWindow, TimeSpan.FromSeconds(Math.Clamp(4 + plain.Length / 20.0, 5, 12)));
-        MarkdownInlines.Fill(BodyText.Inlines, reply, 180);
+        ShowMessage(name, reply, "\uE99A", nearWindow, TimeSpan.FromSeconds(Math.Clamp(5 + plain.Length / 15.0, 6, 45)), markdown: true);
     }
 
     /// <summary>The pill was clicked (used to open Grok Bot on a reply).</summary>
@@ -211,7 +222,7 @@ public sealed partial class RecordingPill : Window
         if (!_hideTimer.IsRunning) Hide();
     }
 
-    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor)
+    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor, bool markdown = false)
     {
         _look = Look.Message;
         AvatarFrame.Visibility = Visibility.Collapsed;
@@ -220,19 +231,35 @@ public sealed partial class RecordingPill : Window
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
         BadgeGlyph.Visibility = Visibility.Visible;
         Badge.Visibility = Visibility.Visible;
+        Badge.VerticalAlignment = body is { Length: > 0 } ? VerticalAlignment.Top : VerticalAlignment.Center;
+        Badge.Margin = body is { Length: > 0 } ? new Thickness(0, 2, 0, 0) : new Thickness(0);
         Wave.Visibility = Visibility.Collapsed;
         Message.Visibility = Visibility.Visible;
         TitleText.Text = title;
-        BodyText.Text = body ?? "";
-        BodyText.Visibility = body is { Length: > 0 } ? Visibility.Visible : Visibility.Collapsed;
 
         Windows.Foundation.Size size;
         if (body is { Length: > 0 })
         {
-            size = new(MaxWidthDip, ReplyHeightDip);
+            if (markdown) MarkdownInlines.FillBlocks(BodyRich.Blocks, body);
+            else MarkdownInlines.FillPlain(BodyRich.Blocks, body);
+            BodyScroll.Visibility = Visibility.Visible;
+            BodyScroll.ChangeView(null, 0, null, true);
+
+            // Grow to fit the whole reply, scrolling only past the maximum height.
+            const double chrome = 12 + 14 + 24 + 10 + 6; // padding, badge, gap, scrollbar room
+            BodyRich.Measure(new(ReplyWidthDip - chrome, double.PositiveInfinity));
+            var bodyHeight = BodyRich.DesiredSize.Height;
+            var height = Math.Clamp(14 + 20 + 3 + bodyHeight + 14, HeightDip, MaxReplyHeightDip);
+            BodyScroll.MaxHeight = height - (14 + 20 + 3 + 14);
+            Body.VerticalAlignment = VerticalAlignment.Stretch;
+            Body.Margin = new Thickness(0, 14, 0, 14);
+            size = new(ReplyWidthDip, height);
         }
         else
         {
+            BodyScroll.Visibility = Visibility.Collapsed;
+            Body.VerticalAlignment = VerticalAlignment.Center;
+            Body.Margin = new Thickness(0);
             _measure.Text = title;
             _measure.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
             size = new(Math.Clamp(_measure.DesiredSize.Width + 12 + 24 + 10 + 14 + 6, 120, MaxWidthDip), HeightDip);
@@ -355,6 +382,8 @@ public sealed partial class RecordingPill : Window
     private const nint WS_EX_NOACTIVATE = 0x08000000;
     private const nint WS_EX_TOOLWINDOW = 0x00000080;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
     private const int DWMWCP_DONOTROUND = 1;
     private const uint MONITOR_DEFAULTTOPRIMARY = 1;
     private const int MDT_EFFECTIVE_DPI = 0;
