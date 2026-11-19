@@ -254,7 +254,7 @@ public sealed partial class MainWindow : Window
             _loading = true;
             BotBox.ItemsSource = bots;
             var current = bots.FirstOrDefault(b => b.Id == _host.Settings.BotId);
-            if (current is null && bots.Count == 1) current = bots[0];
+            current ??= GrokVoice.Bot.BotSender.DefaultBot(bots);
             BotBox.SelectedItem = current;
             _host.Bot.Choose(current);
             _loading = false;
