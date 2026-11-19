@@ -162,6 +162,19 @@ public sealed partial class RecordingPill : Window
     public void ShowListening(IntPtr nearWindow, ListenMode mode)
     {
         _hideTimer.Stop();
+        if (mode == ListenMode.Bot && InConversation)
+        {
+            // Answering the bot: keep the card and listen at the bottom of it.
+            _mode = mode;
+            _level = 0;
+            RemoveTransient();
+            _compose = Compose();
+            Turns.Children.Add(_compose);
+            _look = Look.Listening;
+            FitCard(nearWindow);
+            return;
+        }
+        _conversation = false;
         _look = Look.Listening;
         _mode = mode;
         _level = 0;
@@ -170,6 +183,9 @@ public sealed partial class RecordingPill : Window
         UpdateBadge();
         Wave.Visibility = Visibility.Visible;
         Message.Visibility = Visibility.Collapsed;
+        BodyScroll.Visibility = Visibility.Collapsed;
+        Body.VerticalAlignment = VerticalAlignment.Center;
+        Body.Margin = new Thickness(0);
         Present(nearWindow, new(Badge.Visibility == Visibility.Visible ? 128 : 96, HeightDip));
     }
 
@@ -193,6 +209,7 @@ public sealed partial class RecordingPill : Window
 
     public void ShowError(string message, IntPtr nearWindow)
     {
+        _conversation = false;
         ShowMessage("Grok Voice", message, "\uE783", nearWindow, TimeSpan.FromSeconds(6));
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 153, 164));
     }
@@ -205,10 +222,149 @@ public sealed partial class RecordingPill : Window
     public void ShowReply(string botName, string reply, IntPtr nearWindow)
     {
         // "Jeeves · Chief of Staff" reads as "Jeeves" in the pill.
-        var parts = botName.Split(" · ", 2);
+        var name = botName.Split(" · ", 2)[0].Trim();
+        if (!InConversation)
+        {
+            Turns.Children.Clear();
+            _conversation = true;
+        }
+        RemoveTransient();
+        // Earlier answers step back so the newest turn stands out.
+        foreach (var turn in Turns.Children.OfType<RichTextBlock>()) turn.Opacity = 0.55;
+        Turns.Children.Add(BotTurn(reply, markdown: true));
+        _look = Look.Message;
+        ShowCardHeader(name, "\uE99A");
+        FitCard(nearWindow);
         var plain = MarkdownInlines.ToPlain(reply);
-        ShowMessage(parts[0].Trim(), reply, "\uE99A", nearWindow, TimeSpan.FromSeconds(Math.Clamp(5 + plain.Length / 15.0, 6, 45)), markdown: true,
-            role: parts.Length > 1 ? parts[1].Trim() : null);
+        _hideTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(5 + plain.Length / 15.0, 6, 45));
+        _hideTimer.Start();
+    }
+
+    /// <summary>
+    /// The user's words went to the bot. In an open conversation they appear as the user's own bubble,
+    /// with dots until the answer comes; otherwise a short "Sent to …" confirmation.
+    /// </summary>
+    public void ShowSent(string botName, string text, IntPtr nearWindow)
+    {
+        var name = botName.Split(" · ", 2)[0].Trim();
+        if (!InConversation)
+        {
+            ShowInfo($"Sent to {name}", nearWindow);
+            return;
+        }
+        RemoveTransient();
+        Turns.Children.Add(MyTurn(text));
+        _pending = new TextBlock
+        {
+            Text = "•••", FontSize = 13, CharacterSpacing = 200,
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 125, 125, 132)),
+        };
+        Turns.Children.Add(_pending);
+        _look = Look.Message;
+        FitCard(nearWindow);
+        // Stay up while the bot thinks; the answer restarts the timer.
+        _hideTimer.Interval = TimeSpan.FromSeconds(90);
+        _hideTimer.Start();
+    }
+
+    private bool _conversation;
+    private FrameworkElement? _compose, _pending;
+    private readonly Microsoft.UI.Xaml.Shapes.Rectangle[] _miniBars = new Microsoft.UI.Xaml.Shapes.Rectangle[7];
+
+    /// <summary>A bot conversation card is on screen.</summary>
+    private bool InConversation => _conversation && _onScreen && !_hiding && _look != Look.Rest;
+
+    private void RemoveTransient()
+    {
+        if (_compose is not null) Turns.Children.Remove(_compose);
+        if (_pending is not null) Turns.Children.Remove(_pending);
+        _compose = _pending = null;
+    }
+
+    private static RichTextBlock BotTurn(string text, bool markdown)
+    {
+        var block = new RichTextBlock
+        {
+            FontSize = 13.5, LineHeight = 20, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = false,
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 212, 212, 216)),
+        };
+        if (markdown) MarkdownInlines.FillBlocks(block.Blocks, text);
+        else MarkdownInlines.FillPlain(block.Blocks, text);
+        return block;
+    }
+
+    private static Border MyTurn(string text) => new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Right,
+        MaxWidth = (ReplyWidthDip - 12 - 14 - 8) * 0.8,
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 42, 42, 46)),
+        CornerRadius = new CornerRadius(12, 12, 4, 12),
+        Padding = new Thickness(10, 6, 10, 7),
+        Child = new TextBlock
+        {
+            Text = text, FontSize = 13.5, LineHeight = 20, TextWrapping = TextWrapping.Wrap,
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 242, 242, 242)),
+        },
+    };
+
+    private StackPanel Compose()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Height = 20 };
+        var bars = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        for (var i = 0; i < _miniBars.Length; i++)
+        {
+            _miniBars[i] = new Microsoft.UI.Xaml.Shapes.Rectangle
+            {
+                Width = 3, Height = 3, RadiusX = 1.5, RadiusY = 1.5, VerticalAlignment = VerticalAlignment.Center,
+                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+            };
+            bars.Children.Add(_miniBars[i]);
+        }
+        row.Children.Add(bars);
+        row.Children.Add(new TextBlock
+        {
+            Text = "Listening…", FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 200, 200, 204)),
+        });
+        return row;
+    }
+
+    private void ShowCardHeader(string title, string glyph)
+    {
+        if (AvatarFrame.Visibility != Visibility.Visible)
+        {
+            BadgeGlyph.Glyph = glyph;
+            BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
+            BadgeGlyph.Visibility = Visibility.Visible;
+        }
+        Badge.Visibility = Visibility.Visible;
+        Badge.VerticalAlignment = VerticalAlignment.Center;
+        Badge.Margin = new Thickness(0);
+        Wave.Visibility = Visibility.Collapsed;
+        Message.Visibility = Visibility.Visible;
+        TitleText.Text = title;
+        BodyScroll.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Sizes the card to its conversation (scrolling past the maximum) and keeps the newest turn in view.</summary>
+    private void FitCard(IntPtr nearWindow)
+    {
+        // Padding, header row, gap, conversation, padding, and slack so the last line never clips.
+        const double frame = 14 + 24 + 10 + 14 + 4;
+        Turns.Measure(new(ReplyWidthDip - 12 - 14, double.PositiveInfinity));
+        var height = Math.Clamp(frame + Turns.DesiredSize.Height, HeightDip, MaxReplyHeightDip);
+        BodyScroll.MaxHeight = height - frame;
+        Body.VerticalAlignment = VerticalAlignment.Top;
+        Body.Margin = new Thickness(0, 14, 0, 14);
+        var size = new Windows.Foundation.Size(ReplyWidthDip, height);
+        if (_onScreen && !_hiding && _look != Look.Rest && _size.Height >= HeightDip && _size.Width >= ReplyWidthDip - 1) Resize(size);
+        else Present(nearWindow, size);
+        _frame.Start();
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            BodyScroll.UpdateLayout();
+            BodyScroll.ChangeView(null, BodyScroll.ScrollableHeight, null, true);
+        });
     }
 
     /// <summary>The pill was clicked (used to open Grok Bot on a reply).</summary>
@@ -217,6 +373,8 @@ public sealed partial class RecordingPill : Window
     public void Hide()
     {
         _hideTimer.Stop();
+        _conversation = false;
+        RemoveTransient();
         Avatar.MediaPlayer?.Pause();
         _level = 0;
         if (Resting)
@@ -271,13 +429,23 @@ public sealed partial class RecordingPill : Window
     /// <summary>Hides the pill unless a message is still on screen.</summary>
     public void HideUnlessShowingError()
     {
+        if (_compose is not null && InConversation)
+        {
+            // A reply that came to nothing: drop the listening row and leave the conversation up a while.
+            RemoveTransient();
+            _look = Look.Message;
+            FitCard(IntPtr.Zero);
+            _hideTimer.Interval = TimeSpan.FromSeconds(6);
+            _hideTimer.Start();
+            return;
+        }
         if (!_hideTimer.IsRunning) Hide();
     }
 
-    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor, bool markdown = false, string? role = null)
+    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor)
     {
-        RoleText.Text = role ?? "";
-        HintText.Visibility = markdown ? Visibility.Visible : Visibility.Collapsed;
+        _conversation = false;
+        RemoveTransient();
         _look = Look.Message;
         AvatarFrame.Visibility = Visibility.Collapsed;
         Avatar.MediaPlayer?.Pause();
@@ -285,33 +453,23 @@ public sealed partial class RecordingPill : Window
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
         BadgeGlyph.Visibility = Visibility.Visible;
         Badge.Visibility = Visibility.Visible;
-        Badge.VerticalAlignment = body is { Length: > 0 } ? VerticalAlignment.Top : VerticalAlignment.Center;
-        Badge.Margin = body is { Length: > 0 } ? new Thickness(0, 2, 0, 0) : new Thickness(0);
+        Badge.VerticalAlignment = VerticalAlignment.Center;
+        Badge.Margin = new Thickness(0);
         Wave.Visibility = Visibility.Collapsed;
         Message.Visibility = Visibility.Visible;
         TitleText.Text = title;
 
-        Windows.Foundation.Size size;
         if (body is { Length: > 0 })
         {
-            if (markdown) MarkdownInlines.FillBlocks(BodyRich.Blocks, body);
-            else MarkdownInlines.FillPlain(BodyRich.Blocks, body);
+            Turns.Children.Clear();
+            Turns.Children.Add(BotTurn(body, markdown: false));
             BodyScroll.Visibility = Visibility.Visible;
-            BodyScroll.ChangeView(null, 0, null, true);
-
-            // Grow to fit the whole reply, scrolling only past the maximum height.
-            const double chrome = 12 + 14 + 24 + 10 + 8; // padding, badge, gap, scrollbar room
-            BodyRich.Measure(new(ReplyWidthDip - chrome, double.PositiveInfinity));
-            var bodyHeight = BodyRich.DesiredSize.Height;
-            // Padding, header line, gap, body, padding; a little slack so the last line never clips.
-            const double frame = 14 + 20 + 8 + 14 + 4;
-            var height = Math.Clamp(frame + bodyHeight, HeightDip, MaxReplyHeightDip);
-            BodyScroll.MaxHeight = height - frame;
-            Body.VerticalAlignment = VerticalAlignment.Top;
-            Body.Margin = new Thickness(0, 14, 0, 14);
-            size = new(ReplyWidthDip, height);
+            FitCard(nearWindow);
+            _hideTimer.Interval = showFor;
+            _hideTimer.Start();
+            return;
         }
-        else
+        Windows.Foundation.Size size;
         {
             BodyScroll.Visibility = Visibility.Collapsed;
             Body.VerticalAlignment = VerticalAlignment.Center;
@@ -416,6 +574,8 @@ public sealed partial class RecordingPill : Window
             };
             _barHeight[i] += (target - _barHeight[i]) * 0.35;
             _bars[i].Height = _barHeight[i];
+            if (_compose is not null && i >= 2 && i - 2 < _miniBars.Length && _miniBars[i - 2] is { } mini)
+                mini.Height = Math.Min(16, _barHeight[i]);
             // Let the targets fall back between level updates (every 50 ms).
             _barTarget[i] = 3 + (_barTarget[i] - 3) * 0.88;
         }

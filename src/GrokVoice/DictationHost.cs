@@ -468,7 +468,7 @@ internal sealed class DictationHost : IDisposable
         SaveResult(text, LastText);
         if (_sink.Current == DictationTarget.Bot)
         {
-            _pill.ShowInfo($"Sent to {Bot.BotName ?? "your bot"}", _sink.Keyboard.Target);
+            _pill.ShowSent(Bot.BotName ?? "your bot", LastText, _sink.Keyboard.Target);
             _pill.ShowAvatar(BotAvatarClip);
         }
         Write($"{(_sink.Current == DictationTarget.Bot ? "sent" : "typed")} {text.Length} chars, {(_clock.Elapsed - _sessionStart).TotalMilliseconds:0} ms after start");
