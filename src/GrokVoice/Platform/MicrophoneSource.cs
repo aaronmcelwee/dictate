@@ -2,6 +2,8 @@ using Dictate.Core.Dictation;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace GrokVoice.Platform;
 
@@ -44,6 +46,13 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
         catch (Exception) { return []; }
     }
 
+    /// <summary>
+    /// Ask for the device's unprocessed (RAW) stream, skipping Windows' and the driver's voice effects
+    /// (noise suppression, "Voice Clarity"), which muffle speech and hurt recognition. Falls back to the
+    /// processed stream where the device refuses. Applies from the next Start.
+    /// </summary>
+    public bool Raw { get; set; } = true;
+
     /// <summary>The device and format in use, for diagnostics; empty until the microphone has opened.</summary>
     public string Description { get; private set; } = "";
 
@@ -69,13 +78,23 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
                 }
                 device ??= devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
                 capture = new WasapiCapture(device, useEventSync: true, audioBufferMillisecondsLength: 50);
+                var raw = Raw && TryRequestRaw(capture);
+                capture.DataAvailable += OnData;
+                try { capture.StartRecording(); }
+                catch (Exception) when (raw)
+                {
+                    // Some drivers accept the request but refuse to open the raw stream: use the processed one.
+                    capture.Dispose();
+                    capture = new WasapiCapture(device, useEventSync: true, audioBufferMillisecondsLength: 50);
+                    raw = false;
+                    capture.DataAvailable += OnData;
+                    capture.StartRecording();
+                }
                 var format = capture.WaveFormat;
                 _queue = new FloatQueue(format.SampleRate);
                 _resampler = format.SampleRate == _sampleRate ? _queue : new WdlResamplingSampleProvider(_queue, _sampleRate);
-                Description = $"{device.FriendlyName}, {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample}-bit {format.Encoding}";
-                capture.DataAvailable += OnData;
+                Description = $"{device.FriendlyName}, {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample}-bit {format.Encoding}, {(raw ? "raw" : "processed")}";
                 capture.RecordingStopped += OnStopped;
-                capture.StartRecording();
                 _capture = capture;
                 GrokVoice.Log.Write($"mic   {Description}");
             }
@@ -86,6 +105,57 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Sets AUDCLNT_STREAMOPTIONS_RAW on the capture's audio client before it is initialised.
+    /// NAudio keeps the client private and has no option for it, so reach it by reflection and call
+    /// IAudioClient2::SetClientProperties directly. Returns false (and changes nothing) if anything fails.
+    /// </summary>
+    private static bool TryRequestRaw(WasapiCapture capture)
+    {
+        IntPtr unknown = IntPtr.Zero, client2 = IntPtr.Zero;
+        try
+        {
+            var client = typeof(WasapiCapture).GetField("audioClient", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(capture);
+            var com = client?.GetType().GetField("audioClientInterface", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(client);
+            if (com is null) return false;
+            unknown = Marshal.GetIUnknownForObject(com);
+            var iid = new Guid("726778CD-F60A-4eda-82DE-E47610CD78AA");
+            if (Marshal.QueryInterface(unknown, ref iid, out client2) != 0 || client2 == IntPtr.Zero) return false;
+            // IUnknown (3) + IAudioClient (12) + IsOffloadCapable (1): SetClientProperties is slot 16.
+            var vtable = Marshal.ReadIntPtr(client2);
+            var set = Marshal.GetDelegateForFunctionPointer<SetClientPropertiesFn>(Marshal.ReadIntPtr(vtable, 16 * IntPtr.Size));
+            var props = new ClientProperties { Size = (uint)Marshal.SizeOf<ClientProperties>(), Offload = 0, Category = AudioCategorySpeech, Options = StreamOptionsRaw };
+            var hr = set(client2, ref props);
+            GrokVoice.Log.Write($"mic   raw stream {(hr == 0 ? "requested" : $"refused (0x{hr:X8})")}");
+            return hr == 0;
+        }
+        catch (Exception e)
+        {
+            GrokVoice.Log.Write($"mic   raw stream unavailable ({e.Message})");
+            return false;
+        }
+        finally
+        {
+            if (client2 != IntPtr.Zero) Marshal.Release(client2);
+            if (unknown != IntPtr.Zero) Marshal.Release(unknown);
+        }
+    }
+
+    private const int AudioCategorySpeech = 9;
+    private const int StreamOptionsRaw = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ClientProperties
+    {
+        public uint Size;
+        public int Offload;
+        public int Category;
+        public int Options;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetClientPropertiesFn(IntPtr self, ref ClientProperties properties);
 
     public void Stop()
     {

@@ -62,7 +62,7 @@ internal static partial class AppAwareness
         : kind switch
         {
             AppKind.Email => "Destination: an email. Complete sentences with proper punctuation and paragraphs; no greeting or sign-off unless spoken.",
-            AppKind.Chat => "Destination: a chat message. Casual and brief; light punctuation; no full stop after a single short sentence.",
+            AppKind.Chat => "Destination: a chat message. Casual tone, but keep normal sentence punctuation and capitals; only a single short sentence may drop its final full stop.",
             AppKind.Ai => "Destination: a prompt to an AI assistant. Keep wording exact and technical terms intact; use a list only if the speaker lists items.",
             AppKind.Code => "Destination: a code editor or terminal. Keep identifiers, commands and symbols literal; no trailing full stop.",
             AppKind.Document => "Destination: a document. Full sentences and paragraphs.",
