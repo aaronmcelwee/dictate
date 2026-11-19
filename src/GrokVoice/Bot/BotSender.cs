@@ -39,6 +39,39 @@ internal sealed class BotSender(DictationHost host) : IBotSender
             Choose(main);
             id = main.Id;
         }
-        await Client.SendAsync(id, text, ct).ConfigureAwait(false);
+        var messageId = await Client.SendAsync(id, text, ct).ConfigureAwait(false);
+        _ = WatchAsync(id, messageId);
+    }
+
+    /// <summary>The bot's reply text, on a background thread.</summary>
+    public event Action<string, string>? Replied;
+    /// <summary>The bot gave no reply in time; argument is the bot's name.</summary>
+    public event Action<string>? NoReply;
+
+    private CancellationTokenSource? _watch;
+
+    // Follows only the latest instruction; a new one stops watching the previous one.
+    private async Task WatchAsync(string botId, string messageId)
+    {
+        _watch?.Cancel();
+        var cts = _watch = new CancellationTokenSource();
+        var name = BotName ?? "Your bot";
+        var any = false;
+        try
+        {
+            await Client.WatchRepliesAsync(botId, messageId, reply =>
+            {
+                any = true;
+                Replied?.Invoke(name, reply);
+            }, quietAfterReply: TimeSpan.FromSeconds(30), giveUpAfter: TimeSpan.FromMinutes(5), cts.Token).ConfigureAwait(false);
+            if (!any) NoReply?.Invoke(name);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e)
+        {
+            GrokVoice.Log.Write($"bot   couldn't watch for the reply: {e.Message}");
+        }
     }
 }

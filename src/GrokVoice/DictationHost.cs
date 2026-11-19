@@ -64,6 +64,13 @@ internal sealed class DictationHost : IDisposable
         _alt.Gesture += e => _ui.TryEnqueue(() => OnAltGesture(e));
         _copilot.Gesture += e => _ui.TryEnqueue(() => OnCopilotGesture(e, "hook"));
 
+        Bot.Replied += (name, reply) => _ui.TryEnqueue(() => OnBotReply(name, reply));
+        Bot.NoReply += name => Write($"bot   no reply from {name} within 5 minutes");
+        _pill.Clicked += () =>
+        {
+            if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
+        };
+
         _hook = new KeyboardHook(Write) { RightAltEnabled = Settings.RightAltEnabled };
         _hook.RightAltDown += _alt.Down;
         _hook.RightAltUp += _alt.Up;
@@ -372,6 +379,14 @@ internal sealed class DictationHost : IDisposable
         if (_sink.Current == DictationTarget.Bot) _pill.ShowInfo($"Sent to {Bot.BotName ?? "your bot"}", _sink.Keyboard.Target);
         Write($"{(_sink.Current == DictationTarget.Bot ? "sent" : "typed")} {text.Length} chars, {(_clock.Elapsed - _sessionStart).TotalMilliseconds:0} ms after start");
         Inserted?.Invoke(text);
+    }
+
+    private void OnBotReply(string botName, string reply)
+    {
+        Write($"bot   {botName} replied ({reply.Length} chars)");
+        // Never cover a dictation in progress; the reply is in Grok Bot either way.
+        if (_controller.Status != DictationStatus.Idle) return;
+        _pill.ShowReply(botName, reply, _sink.Keyboard.Target);
     }
 
     private void OnFailed(string message)

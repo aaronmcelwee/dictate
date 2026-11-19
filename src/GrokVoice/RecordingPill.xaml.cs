@@ -55,6 +55,8 @@ public sealed partial class RecordingPill : Window
         // Closing would destroy the window; it is only ever parked.
         AppWindow.Closing += (_, e) => e.Cancel = true;
 
+        Root.Tapped += (_, _) => Clicked?.Invoke();
+
         Park();
         ShowWindow(_hwnd, SW_SHOWNOACTIVATE);
     }
@@ -65,6 +67,7 @@ public sealed partial class RecordingPill : Window
     public void ShowListening(IntPtr nearWindow, string label)
     {
         _hideTimer.Stop();
+        BotGlyph.Visibility = Visibility.Collapsed;
         ModeText.Text = label;
         TranscriptText.Text = "";
         Busy.IsActive = false;
@@ -122,10 +125,30 @@ public sealed partial class RecordingPill : Window
         _hideTimer.Start();
     }
 
+    /// <summary>The bot's reply, shown for a while longer the longer it is. Clicking the pill raises <see cref="Clicked"/>.</summary>
+    public void ShowReply(string botName, string reply, IntPtr nearWindow)
+    {
+        Busy.IsActive = false;
+        MicGlyph.Visibility = Visibility.Collapsed;
+        ErrorGlyph.Visibility = Visibility.Collapsed;
+        LevelHalo.Visibility = Visibility.Collapsed;
+        BotGlyph.Visibility = Visibility.Visible;
+        ModeText.Text = botName;
+        var text = reply.ReplaceLineEndings(" ").Trim();
+        TranscriptText.Text = text.Length > 160 ? text[..159] + "…" : text;
+        if (!_onScreen) Place(nearWindow);
+        _hideTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(4 + text.Length / 20.0, 5, 12));
+        _hideTimer.Start();
+    }
+
+    /// <summary>The pill was clicked (used to open Grok Bot on a reply).</summary>
+    public event Action? Clicked;
+
     public void Hide()
     {
         _hideTimer.Stop();
         Busy.IsActive = false;
+        BotGlyph.Visibility = Visibility.Collapsed;
         _level = 0;
         Park();
     }

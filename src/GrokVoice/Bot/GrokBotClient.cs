@@ -94,12 +94,14 @@ internal sealed class GrokBotClient
     /// through the Cursor backend rather than the gateway. Never retried: if delivery is uncertain,
     /// the user checks Grok Bot.
     /// </summary>
-    public async Task SendAsync(string botId, string prompt, CancellationToken ct)
+    /// <returns>The message id, to find the bot's reply with <see cref="WatchRepliesAsync"/>.</returns>
+    public async Task<string> SendAsync(string botId, string prompt, CancellationToken ct)
     {
+        var messageId = Guid.NewGuid().ToString();
         var body = new JsonObject
         {
             ["agentId"] = botId,
-            ["messageId"] = Guid.NewGuid().ToString(),
+            ["messageId"] = messageId,
             ["text"] = prompt,
             ["sentAtMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
             ["isFork"] = false,
@@ -107,6 +109,71 @@ internal sealed class GrokBotClient
         var result = await BackendAsync("SendGrokBotUserMessage", body, mutation: true, ct).ConfigureAwait(false);
         if (result is JsonObject o && o["refusal"] is JsonNode refusal)
             throw new TranscriptionException($"Grok Bot refused the instruction: {refusal.ToJsonString()}");
+        return messageId;
+    }
+
+    /// <summary>
+    /// Reports the bot's text replies to a message as they arrive, by polling its transcript. Our
+    /// message appears with its id as clientNonce; the bot's replies are "send-message" entries with
+    /// the same requestId. Stops once the replies have been quiet for <paramref name="quietAfterReply"/>,
+    /// or after <paramref name="giveUpAfter"/> with no reply at all.
+    /// </summary>
+    public async Task WatchRepliesAsync(string botId, string messageId, Action<string> onReply,
+        TimeSpan quietAfterReply, TimeSpan giveUpAfter, CancellationToken ct)
+    {
+        var clock = Stopwatch.StartNew();
+        var lastReply = TimeSpan.Zero;
+        string? requestId = null;
+        var shown = new HashSet<string>();
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+            var body = new JsonObject { ["agentId"] = botId, ["limit"] = 12, ["sessionId"] = "" };
+            var value = await BackendAsync("ListGrokBotTranscriptEntries", body, mutation: false, ct).ConfigureAwait(false);
+            var entries = (value?["entries"] as JsonArray ?? new JsonArray())
+                .OfType<JsonObject>()
+                .Select(Decode)
+                .Where(e => e is not null)
+                .Select(e => e!)
+                .OrderBy(e => e["seq"]?.GetValue<long>() ?? 0)
+                .ToList();
+
+            requestId ??= entries.FirstOrDefault(e => Text(e, "clientNonce") == messageId) is { } mine ? Text(mine, "requestId") : null;
+            if (requestId is not null)
+            {
+                foreach (var e in entries.Where(e => Text(e, "kind") == "send-message" && Text(e, "requestId") == requestId))
+                {
+                    var id = Text(e, "id") ?? "";
+                    if (!shown.Add(id)) continue;
+                    if (e["message"] is JsonObject m && Text(m, "type") == "text" && Text(m, "content") is { Length: > 0 } content)
+                    {
+                        lastReply = clock.Elapsed;
+                        onReply(content);
+                    }
+                }
+            }
+
+            if (lastReply > TimeSpan.Zero ? clock.Elapsed - lastReply > quietAfterReply : clock.Elapsed > giveUpAfter) return;
+        }
+
+        // Each entry's body is the transcript entry as JSON, base64 in Connect's JSON encoding.
+        static JsonObject? Decode(JsonObject entry)
+        {
+            try
+            {
+                if (entry["body"]?.GetValue<string>() is not { Length: > 0 } b64) return null;
+                var json = JsonNode.Parse(Convert.FromBase64String(b64)) as JsonObject;
+                if (json is not null) json["seq"] = long.TryParse(entry["seq"]?.ToString(), out var seq) ? seq : 0;
+                return json;
+            }
+            catch (Exception e) when (e is FormatException or JsonException or InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        static string? Text(JsonObject o, string field) =>
+            o[field] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
     }
 
     // A GrokBotService call on the Cursor backend (Connect protocol, JSON), renewing the sign-in once.

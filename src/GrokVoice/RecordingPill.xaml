@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Grok Voice">
 
-    <Grid x:Name="Root" Padding="14,0,20,0" ColumnSpacing="12">
+    <Grid x:Name="Root" Padding="14,0,20,0" ColumnSpacing="12" Background="Transparent">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
@@ -24,6 +24,8 @@
                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
             <FontIcon x:Name="ErrorGlyph" Glyph="&#xE783;" FontSize="18" Visibility="Collapsed"
                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+            <FontIcon x:Name="BotGlyph" Glyph="&#xE99A;" FontSize="16" Visibility="Collapsed"
+                      Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
             <ProgressRing x:Name="Busy" Width="28" Height="28" IsActive="False" />
         </Grid>
 
