@@ -238,7 +238,8 @@ internal sealed class DictationHost : IDisposable
     private ITranscriber CreateTranscriber()
     {
         if (SetupNeeded is { } setup) throw new TranscriptionException(setup);
-        return new XaiStreamingTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language });
+        // The whole clip in one request: a short pause after letting go, for better accuracy than streaming.
+        return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, Words.Keyterms());
     }
 
     private void OnAltGesture(KeyEvent e)

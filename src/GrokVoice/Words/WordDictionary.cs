@@ -42,6 +42,16 @@ internal sealed class WordDictionary
 
     public event Action? Changed;
 
+    /// <summary>Up to 100 terms to bias the recognizer: corrections and names first (the API's limit).</summary>
+    public IReadOnlyList<string> Keyterms() => _entries
+        .Where(e => !e.IsSnippet)
+        .Select(e => e.Replacement ?? e.Phrase)
+        .Where(t => t.Length is > 1 and <= 50)
+        .OrderByDescending(t => t.Any(char.IsUpper) || t.Contains(' '))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Take(100)
+        .ToList();
+
     /// <summary>Adds entries, replacing any with the same phrase. Returns how many were new.</summary>
     public int Merge(IEnumerable<DictionaryEntry> entries)
     {
