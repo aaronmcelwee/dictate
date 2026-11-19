@@ -10,6 +10,9 @@ namespace Dictate.Core.Transcription;
 /// </summary>
 public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<string>? keyterms = null, string? saveClipTo = null) : ITranscriber
 {
+    /// <summary>Raised after a clip is transcribed, with the model and the seconds of audio billed.</summary>
+    public Action<string, double>? Billed { get; init; }
+
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private static readonly Uri Endpoint = new("https://api.x.ai/v1/stt");
     private readonly MemoryStream _audio = new();
@@ -88,6 +91,7 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
                     429 => "Grok is rate limiting; try again in a moment.",
                     _ => $"Grok transcription error (HTTP {(int)response.StatusCode}): {Trim(json)}",
                 });
+            Billed?.Invoke(options.Model, audio.Length / (options.SampleRate * 2.0));
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.TryGetProperty("text", out var text) ? (text.GetString() ?? "").Trim() : "";
         }

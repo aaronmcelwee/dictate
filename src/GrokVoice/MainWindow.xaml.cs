@@ -70,6 +70,9 @@ public sealed partial class MainWindow : Window
         WarmMicSwitch.IsOn = _host.KeepMicWarm;
         RightAltSwitch.IsOn = _host.RightAltEnabled;
         PolishSwitch.IsOn = _host.Settings.PolishEnabled;
+        RestingSwitch.IsOn = _host.RestingPill;
+        ShowUsage();
+        _host.Usage.Changed += () => DispatcherQueue.TryEnqueue(ShowUsage);
         ShowDictionary();
         ShowBotState();
         ShowApiKeyState();
@@ -395,6 +398,73 @@ public sealed partial class MainWindow : Window
     {
         if (_loading || LanguageBox.SelectedItem is not ComboBoxItem { Tag: string code }) return;
         _host.Settings.Language = code;
+    }
+
+    private void RestingSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _host.RestingPill = RestingSwitch.IsOn;
+    }
+
+    private void ShowUsage()
+    {
+        var usage = _host.Usage;
+        (string Name, GrokVoice.Usage.UsageTotals T)[] rows =
+        [
+            ("Today", usage.Today),
+            ("This week", usage.ThisWeek),
+            ("Month to date", usage.MonthToDate),
+            ("Year to date", usage.YearToDate),
+            ("All time", usage.AllTime),
+        ];
+        UsageGrid.Children.Clear();
+        UsageGrid.RowDefinitions.Clear();
+        void Cell(int row, int column, string text, bool header = false, bool strong = false)
+        {
+            var block = new TextBlock
+            {
+                Text = text,
+                HorizontalAlignment = column == 0 ? HorizontalAlignment.Left : HorizontalAlignment.Right,
+                Style = (Style)Application.Current.Resources[header ? "CaptionTextBlockStyle" : strong ? "BodyStrongTextBlockStyle" : "BodyTextBlockStyle"],
+            };
+            if (header) block.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+            Grid.SetRow(block, row);
+            Grid.SetColumn(block, column);
+            UsageGrid.Children.Add(block);
+        }
+        UsageGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        string[] headers = ["", "Dictations", "Audio", "Clean-up tokens", "Cost (USD)"];
+        for (var c = 0; c < headers.Length; c++) Cell(0, c, headers[c], header: true);
+        for (var r = 0; r < rows.Length; r++)
+        {
+            var t = rows[r].T;
+            UsageGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Cell(r + 1, 0, rows[r].Name);
+            Cell(r + 1, 1, t.Dictations.ToString("N0"));
+            Cell(r + 1, 2, FormatAudio(t.AudioSeconds));
+            Cell(r + 1, 3, t.Tokens.ToString("N0"));
+            Cell(r + 1, 4, FormatCost(t.Cost), strong: true);
+        }
+        var all = usage.AllTime;
+        UsageNote.Text = $"Transcription {FormatCost(all.TranscribeCost)} and clean-up {FormatCost(all.CleanUpCost)} all time "
+            + $"({all.InputTokens:N0} tokens in, {all.OutputTokens:N0} out). Counted from this version on, on this PC. "
+            + "Costs use xAI's own figure where the response gives one, else list prices. "
+            + "Messages to Grok Bot go through your Grok subscription and aren't billed here.";
+    }
+
+    private static string FormatAudio(double seconds) =>
+        seconds < 60 ? $"{seconds:0} s" : seconds < 3600 ? $"{seconds / 60:0.0} min" : $"{seconds / 3600:0.0} h";
+
+    private static string FormatCost(decimal usd) =>
+        usd == 0 ? "$0.00" : usd < 0.01m ? $"${usd:0.0000}" : $"${usd:0.00}";
+
+    private async void UsageExport_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = "grok-voice-usage" };
+        picker.FileTypeChoices.Add("CSV", [".csv"]);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        if (await picker.PickSaveFileAsync() is { } file)
+            await Windows.Storage.FileIO.WriteTextAsync(file, _host.Usage.ToCsv());
     }
 
     private void WarmMicSwitch_Toggled(object sender, RoutedEventArgs e)

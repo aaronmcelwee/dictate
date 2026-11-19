@@ -47,7 +47,7 @@ internal sealed class DictationHost : IDisposable
         Bot = new BotSender(this);
         var keyboard = new KeyboardTextSink { IsOwnWindow = h => h == _pill.Handle || h == MainWindowHandle };
         Words = new GrokVoice.Words.WordDictionary();
-        Polisher = new GrokVoice.Words.TextPolisher(() => Keys.Get(), Words, () => Settings.PolishEnabled);
+        Polisher = new GrokVoice.Words.TextPolisher(() => Keys.Get(), Words, () => Settings.PolishEnabled, Usage);
         _sink = new RoutingTextSink(keyboard, Bot, Polisher.PolishAsync);
 
         // Before the controller, which opens the microphone straight away when it's kept warm.
@@ -72,6 +72,7 @@ internal sealed class DictationHost : IDisposable
         {
             if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
         };
+        _pill.Resting = Settings.RestingPill;
 
         _hook = new KeyboardHook(Write) { RightAltEnabled = Settings.RightAltEnabled };
         _hook.RightAltDown += _alt.Down;
@@ -102,6 +103,20 @@ internal sealed class DictationHost : IDisposable
     public BotSender Bot { get; }
     public GrokVoice.Words.WordDictionary Words { get; }
     public GrokVoice.Words.TextPolisher Polisher { get; }
+
+    /// <summary>What each xAI call cost, for the usage totals in settings.</summary>
+    public GrokVoice.Usage.UsageLog Usage { get; } = new(Windows.Storage.ApplicationData.Current.LocalFolder.Path);
+
+    /// <summary>Whether the thin resting pill stays on screen while idle.</summary>
+    public bool RestingPill
+    {
+        get => Settings.RestingPill;
+        set
+        {
+            Settings.RestingPill = value;
+            _pill.Resting = value;
+        }
+    }
 
     public AppSettings Settings { get; } = new();
     public ApiKeyStore Keys { get; } = new();
@@ -240,7 +255,10 @@ internal sealed class DictationHost : IDisposable
         if (SetupNeeded is { } setup) throw new TranscriptionException(setup);
         // The whole clip in one request: a short pause after letting go, for better accuracy than streaming.
         return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, Words.Keyterms(),
-            Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "last-dictation.wav"));
+            Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "last-dictation.wav"))
+        {
+            Billed = (model, seconds) => Usage.AddTranscription(model, seconds),
+        };
     }
 
     private void OnAltGesture(KeyEvent e)

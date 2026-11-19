@@ -26,6 +26,9 @@ public sealed partial class RecordingPill : Window
     private const double MaxWidthDip = 400;
     private const double ReplyWidthDip = 460;
     private const int BarCount = 11;
+    private static readonly Windows.Foundation.Size RestSize = new(46, 8);
+    private static readonly Windows.UI.Color PillColor = Windows.UI.Color.FromArgb(255, 18, 18, 18);
+    private static readonly Windows.UI.Color RestColor = Windows.UI.Color.FromArgb(255, 64, 64, 64);
     private static readonly TimeSpan ResizeTime = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan FadeTime = TimeSpan.FromMilliseconds(140);
 
@@ -40,7 +43,7 @@ public sealed partial class RecordingPill : Window
     private readonly Random _random = new();
     private readonly TextBlock _measure = new() { FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
 
-    private enum Look { Listening, Transcribing, Message }
+    private enum Look { Rest, Listening, Transcribing, Message }
     private Look _look;
     private ListenMode _mode;
     private float _level;
@@ -210,10 +213,53 @@ public sealed partial class RecordingPill : Window
         _hideTimer.Stop();
         Avatar.MediaPlayer?.Pause();
         _level = 0;
+        if (Resting)
+        {
+            Rest();
+            return;
+        }
         if (!_onScreen) return;
         // Shrink and fade, then park off screen (see Animate).
         _hiding = true;
         Resize(new(56, HeightDip));
+    }
+
+    private bool _resting;
+
+    /// <summary>
+    /// Keeps a thin capsule at the bottom of the screen while idle, which grows into the pill
+    /// and shrinks back to it. Off, the pill leaves the screen when idle.
+    /// </summary>
+    public bool Resting
+    {
+        get => _resting;
+        set
+        {
+            if (_resting == value) return;
+            _resting = value;
+            if (value && !_onScreen) Rest();
+            else if (!value && _look == Look.Rest) Park();
+        }
+    }
+
+    /// <summary>Shrinks to the resting capsule on the primary screen.</summary>
+    private void Rest()
+    {
+        _hideTimer.Stop();
+        Avatar.MediaPlayer?.Pause();
+        _look = Look.Rest;
+        _hiding = false;
+        Locate(IntPtr.Zero);
+        if (!_onScreen)
+        {
+            _size = RestSize;
+            _onScreen = true;
+            Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(RestColor);
+            Body.Opacity = 0;
+            Apply(_size, topmost: true);
+            return;
+        }
+        Resize(RestSize);
     }
 
     /// <summary>Hides the pill unless a message is still on screen.</summary>
@@ -287,21 +333,33 @@ public sealed partial class RecordingPill : Window
     private void Present(IntPtr nearWindow, Windows.Foundation.Size size)
     {
         _hiding = false;
+        Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(PillColor);
         if (!_onScreen)
         {
-            var anchor = nearWindow != IntPtr.Zero ? nearWindow : _hwnd;
-            var monitor = MonitorFromWindow(anchor, MONITOR_DEFAULTTOPRIMARY);
-            _scale = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpi, out _) == 0 ? dpi / 96.0 : 1.0;
-            var id = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(anchor);
-            _work = DisplayArea.GetFromWindowId(id, DisplayAreaFallback.Primary).WorkArea;
+            Locate(nearWindow);
             _size = new(56, HeightDip);
             _onScreen = true;
+            Apply(_size, topmost: true);
+        }
+        else if (_size.Height < HeightDip)
+        {
+            // Grow on the screen being typed on, from the same small capsule.
+            Locate(nearWindow);
             Apply(_size, topmost: true);
         }
         Body.Opacity = 0;
         _fadeStart = _clock.Elapsed.TotalMilliseconds;
         Resize(size);
         _frame.Start();
+    }
+
+    private void Locate(IntPtr nearWindow)
+    {
+        var anchor = nearWindow != IntPtr.Zero ? nearWindow : GetDesktopWindow();
+        var monitor = MonitorFromWindow(anchor, MONITOR_DEFAULTTOPRIMARY);
+        _scale = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpi, out _) == 0 ? dpi / 96.0 : 1.0;
+        var id = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(anchor);
+        _work = DisplayArea.GetFromWindowId(id, DisplayAreaFallback.Primary).WorkArea;
     }
 
     private void Resize(Windows.Foundation.Size size)
@@ -326,7 +384,7 @@ public sealed partial class RecordingPill : Window
 
         // Content fades in after a change, and out while hiding.
         var f = Math.Clamp((now - _fadeStart) / FadeTime.TotalMilliseconds, 0, 1);
-        Body.Opacity = _hiding ? Math.Min(Body.Opacity, 1 - t) : f;
+        Body.Opacity = _hiding || _look == Look.Rest ? Math.Min(Body.Opacity, 1 - t) : f;
 
         if (_hiding && t >= 1)
         {
@@ -352,6 +410,11 @@ public sealed partial class RecordingPill : Window
             _barTarget[i] = 3 + (_barTarget[i] - 3) * 0.88;
         }
 
+        if (_look == Look.Rest && t >= 1)
+        {
+            Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(RestColor);
+            _frame.Stop();
+        }
         if (_look == Look.Message && t >= 1 && f >= 1) _frame.Stop();
     }
 
@@ -362,10 +425,11 @@ public sealed partial class RecordingPill : Window
         var width = (int)Math.Round(size.Width * _scale);
         var height = (int)Math.Round(size.Height * _scale);
         var radius = Math.Min(size.Height / 2, 18);
+        var bottom = BottomMarginDip + (HeightDip - Math.Min(size.Height, HeightDip)) / 2;
         Root.CornerRadius = new CornerRadius(radius);
         SetWindowPos(_hwnd, topmost ? HWND_TOPMOST : IntPtr.Zero,
             _work.X + (_work.Width - width) / 2,
-            _work.Y + _work.Height - height - (int)(BottomMarginDip * _scale),
+            _work.Y + _work.Height - height - (int)(bottom * _scale),
             width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW | (topmost ? 0 : SWP_NOZORDER));
         var d = (int)Math.Round(radius * 2 * _scale);
         SetWindowRgn(_hwnd, CreateRoundRectRgn(0, 0, width + 1, height + 1, d, d), true);
@@ -393,6 +457,9 @@ public sealed partial class RecordingPill : Window
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDesktopWindow();
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, int command);

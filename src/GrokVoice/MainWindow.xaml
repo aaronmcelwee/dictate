@@ -114,6 +114,14 @@
                     </tk:SettingsCard.ActionIcon>
                 </tk:SettingsCard>
 
+                <tk:SettingsCard Header="Resting pill"
+                                 Description="Keeps a thin capsule at the bottom of the screen while idle. It grows into the pill when you dictate, and a click opens Grok Bot.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE7C4;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <ToggleSwitch x:Name="RestingSwitch" Toggled="RestingSwitch_Toggled" />
+                </tk:SettingsCard>
+
                 <!-- Words -->
                 <TextBlock Text="Words" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />
 
@@ -136,6 +144,31 @@
                     </StackPanel>
                 </tk:SettingsCard>
                 <InfoBar x:Name="DictionaryBar" IsClosable="True" />
+
+                <!-- Usage -->
+                <TextBlock Text="Usage and cost" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />
+
+                <Border Padding="16,14,16,14" CornerRadius="{ThemeResource ControlCornerRadius}"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                    <StackPanel Spacing="12">
+                        <Grid x:Name="UsageGrid" ColumnSpacing="16" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                        <TextBlock x:Name="UsageNote" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Export CSV…" Click="UsageExport_Click" />
+                            <HyperlinkButton Content="xAI billing console" NavigateUri="https://console.x.ai/" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
 
                 <!-- Keys -->
                 <TextBlock Text="Keys" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />

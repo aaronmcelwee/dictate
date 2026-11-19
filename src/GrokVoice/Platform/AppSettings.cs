@@ -51,6 +51,13 @@ internal sealed class AppSettings
         set => _values[nameof(PolishEnabled)] = value;
     }
 
+    /// <summary>Whether a thin capsule stays at the bottom of the screen while idle.</summary>
+    public bool RestingPill
+    {
+        get => Get(nameof(RestingPill), true);
+        set => _values[nameof(RestingPill)] = value;
+    }
+
     /// <summary>Two-letter language code for Grok, or empty to auto-detect.</summary>
     public string Language
     {

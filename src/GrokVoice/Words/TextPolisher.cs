@@ -12,7 +12,7 @@ namespace GrokVoice.Words;
 /// dictionary, then the dictionary's own replacements and snippets. Any failure or a slow answer
 /// falls back to the dictionary pass alone, so a dictation is never lost or held up for long.
 /// </summary>
-internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictionary, Func<bool> enabled)
+internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictionary, Func<bool> enabled, GrokVoice.Usage.UsageLog? usage = null)
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static readonly Uri Endpoint = new("https://api.x.ai/v1/chat/completions");
@@ -98,12 +98,23 @@ internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictiona
                 throw new HttpRequestException($"HTTP {(int)response.StatusCode}");
             }
             using var doc = JsonDocument.Parse(json);
+            RecordUsage(doc.RootElement);
             var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim();
             if (string.IsNullOrEmpty(content)) return null;
             // A cleaned dictation is about as long as what was said; anything else is the model going off script.
             if (content.Length > text.Length * 1.5 + 40 || content.Length < text.Length * 0.8 - 10) return null;
             return content.Trim('"', '“', '”');
         }
+    }
+
+    private void RecordUsage(JsonElement root)
+    {
+        if (usage is null || !root.TryGetProperty("usage", out var u)) return;
+        long Read(string name) => u.TryGetProperty(name, out var v) && v.TryGetInt64(out var n) ? n : 0;
+        // xAI reports the call's cost in ticks of 1e-10 dollars.
+        decimal? cost = u.TryGetProperty("cost_in_usd_ticks", out var ticks) && ticks.TryGetInt64(out var t) ? t / 10_000_000_000m : null;
+        var model = root.TryGetProperty("model", out var m) && m.GetString() is { Length: > 0 } name ? name : Models[_model];
+        usage.AddCleanUp(model, Read("prompt_tokens"), Read("completion_tokens"), cost);
     }
 
     private string Vocabulary()
