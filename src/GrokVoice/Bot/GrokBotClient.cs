@@ -89,18 +89,71 @@ internal sealed class GrokBotClient
             .ToList();
     }
 
-    /// <summary>Sends a prompt to a bot. Never retried: if delivery is uncertain, the user checks Grok Bot.</summary>
+    /// <summary>
+    /// Sends a prompt to a bot. Bots run on Grok Bot's servers, so (as Grok Bot 1.2 does) this goes
+    /// through the Cursor backend rather than the gateway. Never retried: if delivery is uncertain,
+    /// the user checks Grok Bot.
+    /// </summary>
     public async Task SendAsync(string botId, string prompt, CancellationToken ct)
     {
         var body = new JsonObject
         {
             ["agentId"] = botId,
-            ["prompt"] = prompt,
-            ["clientNonce"] = Guid.NewGuid().ToString(),
+            ["messageId"] = Guid.NewGuid().ToString(),
+            ["text"] = prompt,
+            ["sentAtMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
+            ["isFork"] = false,
         };
-        var result = await CommandAsync("sendPrompt", body, mutation: true, ct).ConfigureAwait(false);
-        if (result is not JsonObject o || o["accepted"]?.GetValue<bool>() != true)
-            throw new TranscriptionException("Grok Bot didn't confirm it got the instruction. Check Grok Bot before sending it again.");
+        var result = await BackendAsync("SendGrokBotUserMessage", body, mutation: true, ct).ConfigureAwait(false);
+        if (result is JsonObject o && o["refusal"] is JsonNode refusal)
+            throw new TranscriptionException($"Grok Bot refused the instruction: {refusal.ToJsonString()}");
+    }
+
+    // A GrokBotService call on the Cursor backend (Connect protocol, JSON), renewing the sign-in once.
+    private async Task<JsonNode?> BackendAsync(string method, JsonObject body, bool mutation, CancellationToken ct)
+    {
+        var access = Read("access") ?? throw new TranscriptionException("Sign in to Grok Bot in Grok Voice's settings first.");
+        for (var attempt = 0; ; attempt++)
+        {
+            using var request = BackendRequest(method, access, body.ToJsonString());
+            HttpResponseMessage response;
+            try
+            {
+                response = await Http.SendAsync(request, ct).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                throw new TranscriptionException(mutation
+                    ? "Couldn't tell whether Grok Bot got the instruction. Check Grok Bot before sending it again."
+                    : "Couldn't reach Grok Bot. Check your connection.");
+            }
+            using (response)
+            {
+                // An expired sign-in is refused before anything is sent, so renewing and retrying is safe.
+                if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0
+                    && !(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false)).Contains("no longer supported", StringComparison.OrdinalIgnoreCase))
+                {
+                    access = await RefreshAsync(ct).ConfigureAwait(false);
+                    continue;
+                }
+                return await ReadJsonAsync(response, mutation, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static HttpRequestMessage BackendRequest(string method, string accessToken, string json)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{Backend}/aiserver.v1.GrokBotService/{method}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Add("x-cursor-client-type", "sand");
+        request.Headers.Add("x-cursor-client-source", "sand-desktop");
+        request.Headers.Add("x-cursor-client-version", InstalledVersion());
+        request.Headers.Add("x-sand-box-namespace", "prod");
+        request.Headers.Add("Connect-Protocol-Version", "1");
+        return request;
     }
 
     private async Task<JsonNode?> CommandAsync(string command, JsonObject body, bool mutation, CancellationToken ct)
@@ -172,16 +225,7 @@ internal sealed class GrokBotClient
 
     private async Task<JsonNode?> EnsureSandBoxAsync(string accessToken, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{Backend}/aiserver.v1.GrokBotService/EnsureSandBox")
-        {
-            Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.Add("x-cursor-client-type", "sand");
-        request.Headers.Add("x-cursor-client-source", "sand-desktop");
-        request.Headers.Add("x-cursor-client-version", InstalledVersion());
-        request.Headers.Add("x-sand-box-namespace", "prod");
-        request.Headers.Add("Connect-Protocol-Version", "1");
+        using var request = BackendRequest("EnsureSandBox", accessToken, "{}");
         using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {

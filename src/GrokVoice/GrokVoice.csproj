@@ -39,6 +39,8 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.250402" />
     <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+    <!-- COM interop for UI Automation, to put the cursor in Grok Bot's text box. -->
+    <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
   </ItemGroup>
 
   <ItemGroup>
