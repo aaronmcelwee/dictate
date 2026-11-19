@@ -205,9 +205,10 @@ public sealed partial class RecordingPill : Window
     public void ShowReply(string botName, string reply, IntPtr nearWindow)
     {
         // "Jeeves · Chief of Staff" reads as "Jeeves" in the pill.
-        var name = botName.Split(" · ")[0].Trim();
+        var parts = botName.Split(" · ", 2);
         var plain = MarkdownInlines.ToPlain(reply);
-        ShowMessage(name, reply, "\uE99A", nearWindow, TimeSpan.FromSeconds(Math.Clamp(5 + plain.Length / 15.0, 6, 45)), markdown: true);
+        ShowMessage(parts[0].Trim(), reply, "\uE99A", nearWindow, TimeSpan.FromSeconds(Math.Clamp(5 + plain.Length / 15.0, 6, 45)), markdown: true,
+            role: parts.Length > 1 ? parts[1].Trim() : null);
     }
 
     /// <summary>The pill was clicked (used to open Grok Bot on a reply).</summary>
@@ -273,8 +274,10 @@ public sealed partial class RecordingPill : Window
         if (!_hideTimer.IsRunning) Hide();
     }
 
-    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor, bool markdown = false)
+    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor, bool markdown = false, string? role = null)
     {
+        RoleText.Text = role ?? "";
+        HintText.Visibility = markdown ? Visibility.Visible : Visibility.Collapsed;
         _look = Look.Message;
         AvatarFrame.Visibility = Visibility.Collapsed;
         Avatar.MediaPlayer?.Pause();
@@ -297,12 +300,14 @@ public sealed partial class RecordingPill : Window
             BodyScroll.ChangeView(null, 0, null, true);
 
             // Grow to fit the whole reply, scrolling only past the maximum height.
-            const double chrome = 12 + 14 + 24 + 10 + 6; // padding, badge, gap, scrollbar room
+            const double chrome = 12 + 14 + 24 + 10 + 8; // padding, badge, gap, scrollbar room
             BodyRich.Measure(new(ReplyWidthDip - chrome, double.PositiveInfinity));
             var bodyHeight = BodyRich.DesiredSize.Height;
-            var height = Math.Clamp(14 + 20 + 3 + bodyHeight + 14, HeightDip, MaxReplyHeightDip);
-            BodyScroll.MaxHeight = height - (14 + 20 + 3 + 14);
-            Body.VerticalAlignment = VerticalAlignment.Stretch;
+            // Padding, header line, gap, body, padding; a little slack so the last line never clips.
+            const double frame = 14 + 20 + 8 + 14 + 4;
+            var height = Math.Clamp(frame + bodyHeight, HeightDip, MaxReplyHeightDip);
+            BodyScroll.MaxHeight = height - frame;
+            Body.VerticalAlignment = VerticalAlignment.Top;
             Body.Margin = new Thickness(0, 14, 0, 14);
             size = new(ReplyWidthDip, height);
         }

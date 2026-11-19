@@ -37,13 +37,25 @@
                         HorizontalAlignment="Center" VerticalAlignment="Center" Height="20" />
 
             <!-- Message: a title line and, for replies, the whole formatted answer (scrolls when long). -->
-            <StackPanel x:Name="Message" Grid.Column="1" VerticalAlignment="Center" Spacing="3" Visibility="Collapsed">
-                <TextBlock x:Name="TitleText" FontSize="14" FontWeight="SemiBold" Foreground="White"
-                           TextTrimming="CharacterEllipsis" MaxLines="1" />
+            <StackPanel x:Name="Message" Grid.Column="1" VerticalAlignment="Center" Spacing="8" Visibility="Collapsed">
+                <!-- Header: who is talking, their role, and a hint that a click opens the conversation. -->
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TitleText" FontSize="14" FontWeight="SemiBold" Foreground="White"
+                               TextTrimming="CharacterEllipsis" MaxLines="1" VerticalAlignment="Center" />
+                    <TextBlock x:Name="RoleText" Grid.Column="1" FontSize="12.5" Foreground="#FF7D7D84"
+                               TextTrimming="CharacterEllipsis" MaxLines="1" VerticalAlignment="Center" />
+                    <TextBlock x:Name="HintText" Grid.Column="2" FontSize="11.5" Foreground="#FF7D7D84"
+                               VerticalAlignment="Center" Visibility="Collapsed" Text="Click to open" />
+                </Grid>
                 <ScrollViewer x:Name="BodyScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Visibility="Collapsed">
                     <RichTextBlock x:Name="BodyRich" FontSize="13.5" LineHeight="20" Foreground="#FFD0D0D0"
-                                   TextWrapping="Wrap" IsTextSelectionEnabled="False" Margin="0,0,6,0" />
+                                   TextWrapping="Wrap" IsTextSelectionEnabled="False" Margin="0,0,8,0" />
                 </ScrollViewer>
             </StackPanel>
         </Grid>
