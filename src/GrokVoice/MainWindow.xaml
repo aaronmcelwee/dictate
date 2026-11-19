@@ -136,14 +136,30 @@
                     </tk:SettingsCard.ActionIcon>
                 </tk:SettingsCard>
 
-                <tk:SettingsCard x:Name="BotCard" Header="Main bot"
-                                 Description="Holding the Copilot key sends what you say to this Grok Bot.">
-                    <tk:SettingsCard.HeaderIcon>
+                <tk:SettingsExpander x:Name="BotExpander" Header="Main bot" IsExpanded="True"
+                                     Description="Holding the Copilot key sends what you say to this Grok Bot. Signs in with Cursor, like the Grok Bot app.">
+                    <tk:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE99A;" />
-                    </tk:SettingsCard.HeaderIcon>
-                    <TextBlock x:Name="BotState" VerticalAlignment="Center"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                </tk:SettingsCard>
+                    </tk:SettingsExpander.HeaderIcon>
+                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <ProgressRing x:Name="BotRing" Width="20" Height="20" IsActive="False" />
+                        <TextBlock x:Name="BotState" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button x:Name="BotSignInButton" Click="BotSignIn_Click" />
+                    </StackPanel>
+                    <tk:SettingsExpander.Items>
+                        <tk:SettingsCard Header="Send instructions to">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ComboBox x:Name="BotBox" MinWidth="220" DisplayMemberPath="Name"
+                                          SelectionChanged="BotBox_SelectionChanged" />
+                                <Button Click="BotRefresh_Click" ToolTipService.ToolTip="Refresh">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                                </Button>
+                            </StackPanel>
+                        </tk:SettingsCard>
+                    </tk:SettingsExpander.Items>
+                </tk:SettingsExpander>
+                <InfoBar x:Name="BotBar" IsClosable="True" />
 
                 <!-- General -->
                 <TextBlock Text="General" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />

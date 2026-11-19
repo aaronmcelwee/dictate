@@ -74,6 +74,7 @@ public sealed partial class MainWindow : Window
         OnStatus(_host.Status);
         _ = LoadStartupStateAsync();
         _loading = false;
+        _ = LoadBotsAsync();
     }
 
     /// <summary>Shows the window and brings it to the front.</summary>
@@ -180,8 +181,103 @@ public sealed partial class MainWindow : Window
         ShowApiKeyState();
     }
 
-    private void ShowBotState() =>
-        BotState.Text = _host.Bot.BotName ?? "Not connected yet";
+    private CancellationTokenSource? _signIn;
+
+    private void ShowBotState()
+    {
+        var signedIn = _host.Bot.Client.IsSignedIn;
+        BotState.Text = _signIn is not null ? "Finish signing in in your browser…"
+            : !signedIn ? "Not signed in"
+            : _host.Bot.BotName ?? "Signed in";
+        BotSignInButton.Content = _signIn is not null ? "Cancel" : signedIn ? "Sign out" : "Sign in";
+        BotSignInButton.Style = !signedIn && _signIn is null ? (Style)Application.Current.Resources["AccentButtonStyle"] : null;
+        BotBox.IsEnabled = signedIn;
+    }
+
+    private void ShowBotError(string title, string message)
+    {
+        BotBar.Severity = InfoBarSeverity.Error;
+        BotBar.Title = title;
+        BotBar.Message = message;
+        BotBar.IsOpen = true;
+    }
+
+    private async void BotSignIn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_signIn is { } running)
+        {
+            running.Cancel();
+            return;
+        }
+        if (_host.Bot.Client.IsSignedIn)
+        {
+            _host.Bot.Client.SignOut();
+            _host.Bot.Choose(null);
+            BotBox.ItemsSource = null;
+            ShowBotState();
+            return;
+        }
+
+        using var cts = new CancellationTokenSource();
+        _signIn = cts;
+        BotBar.IsOpen = false;
+        ShowBotState();
+        try
+        {
+            await _host.Bot.Client.SignInAsync(cts.Token);
+            _host.Write("bot   signed in to Grok Bot");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            ShowBotError("Sign-in didn't finish", ex.Message);
+        }
+        finally
+        {
+            _signIn = null;
+            ShowBotState();
+        }
+        if (_host.Bot.Client.IsSignedIn) await LoadBotsAsync();
+    }
+
+    private async void BotRefresh_Click(object sender, RoutedEventArgs e) => await LoadBotsAsync();
+
+    private async Task LoadBotsAsync()
+    {
+        if (!_host.Bot.Client.IsSignedIn) return;
+        BotRing.IsActive = true;
+        try
+        {
+            var bots = await _host.Bot.Client.ListBotsAsync(CancellationToken.None);
+            _loading = true;
+            BotBox.ItemsSource = bots;
+            var current = bots.FirstOrDefault(b => b.Id == _host.Settings.BotId);
+            if (current is null && bots.Count == 1) current = bots[0];
+            BotBox.SelectedItem = current;
+            _host.Bot.Choose(current);
+            _loading = false;
+            _host.Write($"bot   {bots.Count} bot(s) in the account");
+        }
+        catch (Exception ex)
+        {
+            ShowBotError("Couldn't load your bots", ex.Message);
+        }
+        finally
+        {
+            _loading = false;
+            BotRing.IsActive = false;
+            ShowBotState();
+        }
+    }
+
+    private void BotBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || BotBox.SelectedItem is not GrokVoice.Bot.GrokBot bot) return;
+        _host.Bot.Choose(bot);
+        ShowBotState();
+    }
 
     private void RightAltSwitch_Toggled(object sender, RoutedEventArgs e)
     {
