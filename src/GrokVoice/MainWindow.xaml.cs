@@ -68,6 +68,8 @@ public sealed partial class MainWindow : Window
         LanguageBox.SelectedIndex = Math.Max(0, Array.FindIndex(Languages, l => l.Code == _host.Settings.Language));
         WarmMicSwitch.IsOn = _host.KeepMicWarm;
         RightAltSwitch.IsOn = _host.RightAltEnabled;
+        PolishSwitch.IsOn = _host.Settings.PolishEnabled;
+        ShowDictionary();
         ShowBotState();
         ShowApiKeyState();
         ShowKeyRegistration();
@@ -308,6 +310,78 @@ public sealed partial class MainWindow : Window
     {
         _host.Settings.SetAvatarClip(_host.Settings.BotId, null);
         ShowAvatarClip();
+    }
+
+    private void PolishSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _host.Settings.PolishEnabled = PolishSwitch.IsOn;
+    }
+
+    private void ShowDictionary()
+    {
+        var d = _host.Words;
+        DictionaryCard.Description = d.Entries.Count == 0
+            ? "Your words, replacements and snippets. Import them from Wispr Flow to start."
+            : $"{d.Words} words, {d.Replacements} replacements and {d.Snippets} snippets.";
+        WisprImportButton.IsEnabled = GrokVoice.Words.WisprImport.DatabasePath is not null;
+    }
+
+    private async void WisprImport_Click(object sender, RoutedEventArgs e)
+    {
+        if (GrokVoice.Words.WisprImport.DatabasePath is not { } path) return;
+        WisprImportButton.IsEnabled = false;
+        try
+        {
+            var entries = await Task.Run(() => GrokVoice.Words.WisprImport.FromDatabase(path));
+            ShowImported(entries);
+        }
+        catch (Exception ex)
+        {
+            ShowDictionaryBar(InfoBarSeverity.Error, "Couldn't read Wispr Flow's dictionary", ex.Message);
+        }
+        finally
+        {
+            ShowDictionary();
+        }
+    }
+
+    private async void DictionaryFile_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        picker.FileTypeFilter.Add(".json");
+        picker.FileTypeFilter.Add(".sqlite");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var file = await picker.PickSingleFileAsync();
+        if (file is null) return;
+        try
+        {
+            var entries = await Task.Run(() => file.Path.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase)
+                ? GrokVoice.Words.WisprImport.FromDatabase(file.Path)
+                : GrokVoice.Words.WisprImport.FromJson(file.Path));
+            ShowImported(entries);
+        }
+        catch (Exception ex)
+        {
+            ShowDictionaryBar(InfoBarSeverity.Error, "Couldn't import that file", ex.Message);
+        }
+        ShowDictionary();
+    }
+
+    private void ShowImported(List<GrokVoice.Words.DictionaryEntry> entries)
+    {
+        var added = _host.Words.Merge(entries);
+        _host.Write($"dict  imported {entries.Count} entries, {added} new");
+        ShowDictionaryBar(InfoBarSeverity.Success, "Imported",
+            $"{entries.Count} entries read, {added} new. Grok Voice now uses them for every dictation.");
+    }
+
+    private void ShowDictionaryBar(InfoBarSeverity severity, string title, string message)
+    {
+        DictionaryBar.Severity = severity;
+        DictionaryBar.Title = title;
+        DictionaryBar.Message = message;
+        DictionaryBar.IsOpen = true;
     }
 
     private void RightAltSwitch_Toggled(object sender, RoutedEventArgs e)

@@ -114,6 +114,29 @@
                     </tk:SettingsCard.ActionIcon>
                 </tk:SettingsCard>
 
+                <!-- Words -->
+                <TextBlock Text="Words" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />
+
+                <tk:SettingsCard Header="Clean up with Grok"
+                                 Description="A fast, cheap Grok model fixes punctuation, filler words and misheard names using your dictionary before the text is typed or sent. Adds a moment to each dictation.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE771;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <ToggleSwitch x:Name="PolishSwitch" Toggled="PolishSwitch_Toggled" />
+                </tk:SettingsCard>
+
+                <tk:SettingsCard x:Name="DictionaryCard" Header="Dictionary"
+                                 Description="Your words, replacements and snippets.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE82D;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="WisprImportButton" Content="Import from Wispr Flow" Click="WisprImport_Click" />
+                        <Button Content="Import file…" Click="DictionaryFile_Click" />
+                    </StackPanel>
+                </tk:SettingsCard>
+                <InfoBar x:Name="DictionaryBar" IsClosable="True" />
+
                 <!-- Keys -->
                 <TextBlock Text="Keys" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />
 

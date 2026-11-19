@@ -46,7 +46,9 @@ internal sealed class DictationHost : IDisposable
         GrokVoice.Log.Sink = Write;
         Bot = new BotSender(this);
         var keyboard = new KeyboardTextSink { IsOwnWindow = h => h == _pill.Handle || h == MainWindowHandle };
-        _sink = new RoutingTextSink(keyboard, Bot);
+        Words = new GrokVoice.Words.WordDictionary();
+        Polisher = new GrokVoice.Words.TextPolisher(() => Keys.Get(), Words, () => Settings.PolishEnabled);
+        _sink = new RoutingTextSink(keyboard, Bot, Polisher.PolishAsync);
 
         // Before the controller, which opens the microphone straight away when it's kept warm.
         _mic.Faulted += m => _ui.TryEnqueue(() => OnFailed(m));
@@ -98,6 +100,8 @@ internal sealed class DictationHost : IDisposable
 
     /// <summary>Sends Copilot key instructions to the main bot.</summary>
     public BotSender Bot { get; }
+    public GrokVoice.Words.WordDictionary Words { get; }
+    public GrokVoice.Words.TextPolisher Polisher { get; }
 
     public AppSettings Settings { get; } = new();
     public ApiKeyStore Keys { get; } = new();
@@ -330,9 +334,9 @@ internal sealed class DictationHost : IDisposable
         if (_controller.Status == DictationStatus.Idle && _altMachine.State == DictationState.Idle) _owner = null;
     }
 
-    private string ListeningLabel => _owner == KeySource.Copilot
-        ? $"To {Bot.BotName ?? "bot"}"
-        : _altMachine.State == DictationState.HandsFree ? "Hands-free" : "Listening";
+    private RecordingPill.ListenMode ListeningMode => _owner == KeySource.Copilot ? RecordingPill.ListenMode.Bot
+        : _altMachine.State == DictationState.HandsFree ? RecordingPill.ListenMode.HandsFree
+        : RecordingPill.ListenMode.Cursor;
 
     private void OnAltState(DictationState state)
     {
@@ -340,7 +344,7 @@ internal sealed class DictationHost : IDisposable
         {
             // A single tap also opens the mic, but the pill waits until it's clearly a dictation.
             case DictationState.PushToTalk or DictationState.HandsFree when _controller.Status == DictationStatus.Listening:
-                _pill.ShowListening(_sink.Keyboard.Target, ListeningLabel);
+                _pill.ShowListening(_sink.Keyboard.Target, ListeningMode);
                 Write($"pill  {state}");
                 break;
             case DictationState.Idle:
@@ -358,7 +362,7 @@ internal sealed class DictationHost : IDisposable
                 _sessionStart = _clock.Elapsed;
                 _sessionPeak = 0;
                 if (_owner == KeySource.Copilot || _altMachine.State is DictationState.PushToTalk or DictationState.HandsFree)
-                    _pill.ShowListening(_sink.Keyboard.Target, ListeningLabel);
+                    _pill.ShowListening(_sink.Keyboard.Target, ListeningMode);
                 if (_owner == KeySource.Copilot) _pill.ShowAvatar(BotAvatarClip);
                 break;
             case DictationStatus.Transcribing:
@@ -376,7 +380,7 @@ internal sealed class DictationHost : IDisposable
 
     private void OnInserted(string text)
     {
-        LastText = text;
+        LastText = _sink.LastDelivered is { Length: > 0 } delivered ? delivered : text;
         if (_sink.Current == DictationTarget.Bot)
         {
             _pill.ShowInfo($"Sent to {Bot.BotName ?? "your bot"}", _sink.Keyboard.Target);

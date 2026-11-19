@@ -21,7 +21,7 @@ internal interface IBotSender
 /// The controller's one text sink, pointing at the cursor or the bot. The target is chosen when a
 /// dictation starts and kept until its text has been delivered, even if the other key is pressed.
 /// </summary>
-internal sealed class RoutingTextSink(KeyboardTextSink keyboard, IBotSender bot) : ITextSink
+internal sealed class RoutingTextSink(KeyboardTextSink keyboard, IBotSender bot, Func<string, CancellationToken, Task<string>> polish) : ITextSink
 {
     private DictationTarget _next = DictationTarget.Cursor;
     private DictationTarget _current = DictationTarget.Cursor;
@@ -44,9 +44,17 @@ internal sealed class RoutingTextSink(KeyboardTextSink keyboard, IBotSender bot)
         Keyboard.RememberTarget();
     }
 
-    public Task InsertAsync(string text, CancellationToken ct) => _current switch
+    /// <summary>The text last delivered, after clean-up.</summary>
+    public string LastDelivered { get; private set; } = "";
+
+    public async Task InsertAsync(string text, CancellationToken ct)
     {
-        DictationTarget.Bot => bot.SendAsync(text, ct),
-        _ => Keyboard.InsertAsync(text, ct),
-    };
+        text = await polish(text, ct).ConfigureAwait(false);
+        LastDelivered = text;
+        await (_current switch
+        {
+            DictationTarget.Bot => bot.SendAsync(text, ct),
+            _ => Keyboard.InsertAsync(text, ct),
+        }).ConfigureAwait(false);
+    }
 }

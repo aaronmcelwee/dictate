@@ -44,6 +44,13 @@ internal sealed class AppSettings
         else _values["AvatarClip_" + botId] = path;
     }
 
+    /// <summary>Whether dictations get a clean-up pass from a fast Grok model before they are typed or sent.</summary>
+    public bool PolishEnabled
+    {
+        get => Get(nameof(PolishEnabled), true);
+        set => _values[nameof(PolishEnabled)] = value;
+    }
+
     /// <summary>Two-letter language code for Grok, or empty to auto-detect.</summary>
     public string Language
     {
