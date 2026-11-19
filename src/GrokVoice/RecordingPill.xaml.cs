@@ -600,14 +600,45 @@ public sealed partial class RecordingPill : Window
         // The window region does the rounding. Rounding the XAML too leaves anti-aliased corners that
         // blend with the light window background underneath, which shows as a pale rim.
         Root.CornerRadius = new CornerRadius(0);
+        // WinUI keeps a few pixels of window frame around the content, which Windows paints light.
+        // Size the window so the content itself is the pill, and clip the window to the content.
+        var (left, top, right, bottomInset) = FrameInsets();
         SetWindowPos(_hwnd, topmost ? HWND_TOPMOST : IntPtr.Zero,
-            _work.X + (_work.Width - width) / 2,
-            _work.Y + _work.Height - height - (int)(bottom * _scale),
-            width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW | (topmost ? 0 : SWP_NOZORDER));
+            _work.X + (_work.Width - width) / 2 - left,
+            _work.Y + _work.Height - height - (int)(bottom * _scale) - top,
+            width + left + right, height + top + bottomInset, SWP_NOACTIVATE | SWP_SHOWWINDOW | (topmost ? 0 : SWP_NOZORDER));
         var d = (int)Math.Round(radius * 2 * _scale);
-        SetWindowRgn(_hwnd, CreateRoundRectRgn(0, 0, width + 1, height + 1, d, d), true);
+        SetWindowRgn(_hwnd, CreateRoundRectRgn(left, top, left + width + 1, top + height + 1, d, d), true);
         if (topmost) SuppressFrame();
     }
+
+    /// <summary>How far the client area (where XAML draws) sits inside the window, in pixels.</summary>
+    private (int Left, int Top, int Right, int Bottom) FrameInsets()
+    {
+        if (!GetWindowRect(_hwnd, out var window) || !GetClientRect(_hwnd, out var client)) return (0, 0, 0, 0);
+        var origin = new POINT();
+        if (!ClientToScreen(_hwnd, ref origin)) return (0, 0, 0, 0);
+        var left = Math.Max(0, origin.X - window.Left);
+        var top = Math.Max(0, origin.Y - window.Top);
+        var right = Math.Max(0, window.Right - (origin.X + client.Right));
+        var bottom = Math.Max(0, window.Bottom - (origin.Y + client.Bottom));
+        return (left, top, right, bottom);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
 
     /// <summary>
     /// Windows 11 draws a light, anti-aliased frame line along a window's shape (including a region's
