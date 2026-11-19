@@ -49,6 +49,10 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
             ["endpoint"] = Endpoint.ToString(),
             ["audio"] = Stats(audio, options.SampleRate),
         };
+        // Quiet microphones lose consonants to the recognizer: bring the loudest moment up to -3 dBFS.
+        var gain = Normalize(audio);
+        diag["gain_db"] = Math.Round(20 * Math.Log10(gain), 1);
+        diag["audio_sent"] = Stats(audio, options.SampleRate);
         var fields = new List<string[]>();
         var watch = System.Diagnostics.Stopwatch.StartNew();
         if (DiagnosticsFolder is { } folder)
@@ -135,6 +139,25 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.TryGetProperty("text", out var text) ? (text.GetString() ?? "").Trim() : "";
         }
+    }
+
+    /// <summary>Scales 16-bit PCM in place so its peak sits at -3 dBFS, by at most +24 dB; returns the gain used.</summary>
+    public static double Normalize(byte[] pcm)
+    {
+        var peak = 0;
+        for (var i = 0; i + 1 < pcm.Length; i += 2)
+            peak = Math.Max(peak, Math.Abs((int)(short)(pcm[i] | pcm[i + 1] << 8)));
+        if (peak == 0) return 1;
+        var gain = Math.Min(32768 * 0.708 / peak, 16.0);
+        if (gain <= 1.05) return 1;
+        for (var i = 0; i + 1 < pcm.Length; i += 2)
+        {
+            var v = (int)Math.Round((short)(pcm[i] | pcm[i + 1] << 8) * gain);
+            v = Math.Clamp(v, short.MinValue, short.MaxValue);
+            pcm[i] = (byte)v;
+            pcm[i + 1] = (byte)(v >> 8);
+        }
+        return gain;
     }
 
     /// <summary>Level statistics of 16-bit PCM, to tell a quiet, clipped or muffled microphone from a model problem.</summary>

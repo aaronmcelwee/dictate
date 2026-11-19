@@ -292,7 +292,7 @@ internal sealed class DictationHost : IDisposable
                 ["clean_up_answer"] = Polisher.LastAnswer,
                 ["clean_up"] = Polisher.LastNote,
                 ["delivered"] = delivered,
-                ["microphone"] = MicrophoneName(),
+                ["microphone"] = _mic.Description,
                 ["dictionary_entries"] = Words.Entries.Count,
                 ["version"] = Windows.ApplicationModel.Package.Current.Id.Version is var v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : "",
             };
@@ -303,16 +303,6 @@ internal sealed class DictationHost : IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    private static string MicrophoneName()
-    {
-        try
-        {
-            var names = Enumerable.Range(0, NAudio.Wave.WaveInEvent.DeviceCount)
-                .Select(i => NAudio.Wave.WaveInEvent.GetCapabilities(i).ProductName);
-            return string.Join(" | ", names);
-        }
-        catch (Exception e) { return e.Message; }
-    }
 
     private void OnAltGesture(KeyEvent e)
     {
