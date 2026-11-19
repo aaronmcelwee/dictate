@@ -13,6 +13,9 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
     /// <summary>Raised after a clip is transcribed, with the model and the seconds of audio billed.</summary>
     public Action<string, double>? Billed { get; init; }
 
+    /// <summary>When set, each clip's audio (audio.wav) and the request and response (stt.json) are kept here.</summary>
+    public string? DiagnosticsFolder { get; init; }
+
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private static readonly Uri Endpoint = new("https://api.x.ai/v1/stt");
     private readonly MemoryStream _audio = new();
@@ -40,26 +43,60 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
         lock (_gate) audio = _audio.ToArray();
         LastAudio = audio;
         if (saveClipTo is not null) SaveWav(saveClipTo, audio, options.SampleRate);
-        if (audio.Length < options.SampleRate * 2 * MinimumSpeech.TotalSeconds) return "";
+        var diag = new Dictionary<string, object?>
+        {
+            ["time"] = DateTimeOffset.Now.ToString("o"),
+            ["endpoint"] = Endpoint.ToString(),
+            ["audio"] = Stats(audio, options.SampleRate),
+        };
+        var fields = new List<string[]>();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        if (DiagnosticsFolder is { } folder)
+        {
+            try { Directory.CreateDirectory(folder); } catch (IOException) { }
+            SaveWav(Path.Combine(folder, "audio.wav"), audio, options.SampleRate);
+        }
+        void Keep(int? status, string? body, string? error)
+        {
+            if (DiagnosticsFolder is null) return;
+            diag["fields"] = fields;
+            diag["status"] = status;
+            diag["elapsed_ms"] = watch.ElapsedMilliseconds;
+            diag["response"] = body;
+            diag["error"] = error;
+            try { File.WriteAllText(Path.Combine(DiagnosticsFolder, "stt.json"), JsonSerializer.Serialize(diag, new JsonSerializerOptions { WriteIndented = true })); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        if (audio.Length < options.SampleRate * 2 * MinimumSpeech.TotalSeconds)
+        {
+            Keep(null, null, "shorter than the minimum; not sent");
+            return "";
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(options.FinishTimeout + TimeSpan.FromSeconds(audio.Length / (options.SampleRate * 2.0) / 4));
 
         // Options first: the API ignores fields after the file.
         using var form = new MultipartFormDataContent();
-        form.Add(new StringContent(options.Model), "model");
-        form.Add(new StringContent("pcm"), "audio_format");
-        form.Add(new StringContent(options.SampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture)), "sample_rate");
+        void Field(string name, string value)
+        {
+            form.Add(new StringContent(value), name);
+            fields.Add([name, value]);
+        }
+        Field("model", options.Model);
+        Field("audio_format", "pcm");
+        Field("sample_rate", options.SampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (!string.IsNullOrEmpty(options.Language))
         {
-            form.Add(new StringContent(options.Language), "language");
-            form.Add(new StringContent("true"), "format");
+            Field("language", options.Language);
+            Field("format", "true");
         }
         // The one-shot endpoint's voice gate defaults to 0.5, which drops quieter stretches of speech
         // and leaves fragments; streaming uses 0.08. Turn it off: the clip is all speech the user chose to record.
-        form.Add(new StringContent("0"), "vad_threshold");
+        Field("vad_threshold", "0");
         foreach (var term in (keyterms ?? []).Where(t => t.Length is > 0 and <= 50).Distinct(StringComparer.OrdinalIgnoreCase).Take(100))
-            form.Add(new StringContent(term), "keyterm");
+            Field("keyterm", term);
         var file = new ByteArrayContent(audio);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(file, "file", "dictation.pcm");
@@ -75,15 +112,18 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
         }
         catch (HttpRequestException e)
         {
+            Keep(null, null, e.Message);
             throw new TranscriptionException($"Couldn't reach Grok: {e.Message}", e);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            Keep(null, null, "timed out");
             throw new TranscriptionException("Grok took too long to transcribe.");
         }
         using (response)
         {
             var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            Keep((int)response.StatusCode, json, null);
             if (!response.IsSuccessStatusCode)
                 throw new TranscriptionException((int)response.StatusCode switch
                 {
@@ -95,6 +135,36 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.TryGetProperty("text", out var text) ? (text.GetString() ?? "").Trim() : "";
         }
+    }
+
+    /// <summary>Level statistics of 16-bit PCM, to tell a quiet, clipped or muffled microphone from a model problem.</summary>
+    public static Dictionary<string, double> Stats(byte[] pcm, int sampleRate)
+    {
+        var n = pcm.Length / 2;
+        if (n == 0) return new() { ["seconds"] = 0 };
+        double sum = 0, sumSq = 0, peak = 0, clipped = 0, hf = 0, total = 0;
+        double prev = 0;
+        for (var i = 0; i < n; i++)
+        {
+            double x = (short)(pcm[2 * i] | pcm[2 * i + 1] << 8);
+            sum += x; sumSq += x * x;
+            var a = Math.Abs(x);
+            if (a > peak) peak = a;
+            if (a >= 32767) clipped++;
+            // First difference as a crude high-pass: its share of energy shows how much treble survives.
+            var d = x - prev; prev = x;
+            hf += d * d; total += x * x;
+        }
+        static double Db(double v) => v <= 0 ? -120 : 20 * Math.Log10(v / 32768);
+        return new()
+        {
+            ["seconds"] = Math.Round((double)n / sampleRate, 2),
+            ["peak_dbfs"] = Math.Round(Db(peak), 1),
+            ["rms_dbfs"] = Math.Round(Db(Math.Sqrt(sumSq / n)), 1),
+            ["clipped_pct"] = Math.Round(100 * clipped / n, 3),
+            ["dc_offset"] = Math.Round(sum / n, 1),
+            ["treble_ratio"] = Math.Round(total > 0 ? hf / total : 0, 4),
+        };
     }
 
     /// <summary>Keeps the last clip as a WAV file so a bad transcript can be checked against what was recorded.</summary>

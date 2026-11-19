@@ -72,7 +72,11 @@ public sealed partial class RecordingPill : Window
         AppWindow.SetPresenter(presenter);
         AppWindow.IsShownInSwitchers = false;
 
-        var exStyle = GetWindowLongPtr(_hwnd, GWL_EXSTYLE);
+        // A plain popup: no caption, sizing frame or border styles left over from the presenter, any of
+        // which makes Windows 11 draw a light 1 px frame line around the window.
+        var style = GetWindowLongPtr(_hwnd, GWL_STYLE);
+        SetWindowLongPtr(_hwnd, GWL_STYLE, (style & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME | WS_SYSMENU)) | WS_POPUP);
+        var exStyle = GetWindowLongPtr(_hwnd, GWL_EXSTYLE) & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME | WS_EX_STATICEDGE);
         SetWindowLongPtr(_hwnd, GWL_EXSTYLE, exStyle | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
         // The capsule shape comes from a window region, so Windows must not add its own corners.
         var corners = DWMWCP_DONOTROUND;
@@ -80,6 +84,7 @@ public sealed partial class RecordingPill : Window
         // No light frame line around the capsule.
         var noBorder = DWMWA_COLOR_NONE;
         DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref noBorder, sizeof(int));
+        SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
         for (var i = 0; i < BarCount; i++)
         {
@@ -426,7 +431,9 @@ public sealed partial class RecordingPill : Window
         var height = (int)Math.Round(size.Height * _scale);
         var radius = Math.Min(size.Height / 2, 18);
         var bottom = BottomMarginDip + (HeightDip - Math.Min(size.Height, HeightDip)) / 2;
-        Root.CornerRadius = new CornerRadius(radius);
+        // The window region does the rounding. Rounding the XAML too leaves anti-aliased corners that
+        // blend with the light window background underneath, which shows as a pale rim.
+        Root.CornerRadius = new CornerRadius(0);
         SetWindowPos(_hwnd, topmost ? HWND_TOPMOST : IntPtr.Zero,
             _work.X + (_work.Width - width) / 2,
             _work.Y + _work.Height - height - (int)(bottom * _scale),
@@ -443,6 +450,17 @@ public sealed partial class RecordingPill : Window
     }
 
     private const int GWL_EXSTYLE = -20;
+    private const int GWL_STYLE = -16;
+    private const nint WS_POPUP = unchecked((nint)0x80000000L);
+    private const nint WS_CAPTION = 0x00C00000;
+    private const nint WS_BORDER = 0x00800000;
+    private const nint WS_DLGFRAME = 0x00400000;
+    private const nint WS_THICKFRAME = 0x00040000;
+    private const nint WS_SYSMENU = 0x00080000;
+    private const nint WS_EX_WINDOWEDGE = 0x00000100;
+    private const nint WS_EX_CLIENTEDGE = 0x00000200;
+    private const nint WS_EX_DLGMODALFRAME = 0x00000001;
+    private const nint WS_EX_STATICEDGE = 0x00020000;
     private const nint WS_EX_NOACTIVATE = 0x08000000;
     private const nint WS_EX_TOOLWINDOW = 0x00000080;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -454,6 +472,8 @@ public sealed partial class RecordingPill : Window
     private const int SW_SHOWNOACTIVATE = 4;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
     private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_FRAMECHANGED = 0x0020;
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;

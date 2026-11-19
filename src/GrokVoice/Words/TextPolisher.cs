@@ -26,6 +26,10 @@ internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictiona
     /// <summary>The last dictation as heard and after clean-up, for the settings window.</summary>
     public string LastRaw { get; private set; } = "";
     public string LastCleaned { get; private set; } = "";
+    /// <summary>What the last clean-up did: the model and time, or why its answer was not used.</summary>
+    public string LastNote { get; private set; } = "";
+    /// <summary>The model's own answer before checks, for diagnostics.</summary>
+    public string LastAnswer { get; private set; } = "";
 
     private const string Instructions =
         """
@@ -44,6 +48,8 @@ internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictiona
         text = text.Trim();
         if (text.Length == 0) return text;
         var cleaned = text;
+        LastNote = enabled() ? "no API key" : "clean-up off";
+        LastAnswer = "";
         if (enabled() && apiKey() is { Length: > 0 } key)
         {
             var watch = Stopwatch.StartNew();
@@ -53,16 +59,19 @@ internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictiona
                 timeout.CancelAfter(Budget);
                 cleaned = await AskAsync(key, text, timeout.Token).ConfigureAwait(false) ?? text;
                 Log.Write($"polish {Models[_model]} {watch.ElapsedMilliseconds} ms, {text.Length} -> {cleaned.Length} chars");
+                LastNote = $"{Models[_model]}, {watch.ElapsedMilliseconds} ms" + (cleaned == text && LastAnswer.Length > 0 && LastAnswer != text ? ", answer rejected (length check)" : "");
                 LastRaw = text;
                 LastCleaned = cleaned;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 Log.Write($"polish timed out after {watch.ElapsedMilliseconds} ms; using the words as heard");
+                LastNote = $"timed out after {watch.ElapsedMilliseconds} ms";
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
                 Log.Write($"polish failed ({e.Message}); using the words as heard");
+                LastNote = $"failed: {e.Message}";
             }
         }
         return dictionary.Apply(cleaned);
@@ -100,6 +109,7 @@ internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictiona
             using var doc = JsonDocument.Parse(json);
             RecordUsage(doc.RootElement);
             var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim();
+            LastAnswer = content ?? "";
             if (string.IsNullOrEmpty(content)) return null;
             // A cleaned dictation is about as long as what was said; anything else is the model going off script.
             if (content.Length > text.Length * 1.5 + 40 || content.Length < text.Length * 0.8 - 10) return null;

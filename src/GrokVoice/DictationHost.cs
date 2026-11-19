@@ -254,11 +254,64 @@ internal sealed class DictationHost : IDisposable
     {
         if (SetupNeeded is { } setup) throw new TranscriptionException(setup);
         // The whole clip in one request: a short pause after letting go, for better accuracy than streaming.
+        _diagnostics = NewDiagnosticsFolder();
         return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, Words.Keyterms(),
             Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "last-dictation.wav"))
         {
             Billed = (model, seconds) => Usage.AddTranscription(model, seconds),
+            DiagnosticsFolder = _diagnostics,
         };
+    }
+
+    /// <summary>Recent dictations, one folder each (audio.wav, stt.json, result.json), newest 50 kept.</summary>
+    public static string DiagnosticsRoot { get; } = Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "diagnostics");
+    private string? _diagnostics;
+
+    private static string NewDiagnosticsFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(DiagnosticsRoot);
+            foreach (var old in Directory.GetDirectories(DiagnosticsRoot).OrderByDescending(d => d).Skip(49))
+                try { Directory.Delete(old, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        catch (IOException) { }
+        return Path.Combine(DiagnosticsRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private void SaveResult(string heard, string delivered)
+    {
+        if (_diagnostics is null) return;
+        try
+        {
+            Directory.CreateDirectory(_diagnostics);
+            var result = new Dictionary<string, object?>
+            {
+                ["target"] = _sink.Current.ToString(),
+                ["heard"] = heard,
+                ["clean_up_answer"] = Polisher.LastAnswer,
+                ["clean_up"] = Polisher.LastNote,
+                ["delivered"] = delivered,
+                ["microphone"] = MicrophoneName(),
+                ["dictionary_entries"] = Words.Entries.Count,
+                ["version"] = Windows.ApplicationModel.Package.Current.Id.Version is var v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : "",
+            };
+            File.WriteAllText(Path.Combine(_diagnostics, "result.json"),
+                System.Text.Json.JsonSerializer.Serialize(result, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static string MicrophoneName()
+    {
+        try
+        {
+            var names = Enumerable.Range(0, NAudio.Wave.WaveInEvent.DeviceCount)
+                .Select(i => NAudio.Wave.WaveInEvent.GetCapabilities(i).ProductName);
+            return string.Join(" | ", names);
+        }
+        catch (Exception e) { return e.Message; }
     }
 
     private void OnAltGesture(KeyEvent e)
@@ -401,6 +454,7 @@ internal sealed class DictationHost : IDisposable
     private void OnInserted(string text)
     {
         LastText = _sink.LastDelivered is { Length: > 0 } delivered ? delivered : text;
+        SaveResult(text, LastText);
         if (_sink.Current == DictationTarget.Bot)
         {
             _pill.ShowInfo($"Sent to {Bot.BotName ?? "your bot"}", _sink.Keyboard.Target);
