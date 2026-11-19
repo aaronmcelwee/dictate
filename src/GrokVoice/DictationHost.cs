@@ -73,6 +73,7 @@ internal sealed class DictationHost : IDisposable
 
         Bot.Replied += (name, reply) => _ui.TryEnqueue(() => OnBotReply(name, reply));
         Bot.NoReply += name => Write($"bot   no reply from {name} within 5 minutes");
+        GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), Settings.Language, Words, Usage);
         _pill.Clicked += () =>
         {
             if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
