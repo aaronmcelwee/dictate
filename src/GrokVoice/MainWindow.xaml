@@ -217,6 +217,8 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                         </Grid>
                         <TextBlock x:Name="UsageNote" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
@@ -224,6 +226,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Export CSV…" Click="UsageExport_Click" />
                             <HyperlinkButton Content="xAI billing console" NavigateUri="https://console.x.ai/" />
+                            <HyperlinkButton Content="ElevenLabs usage" NavigateUri="https://elevenlabs.io/app/subscription" />
                         </StackPanel>
                     </StackPanel>
                 </Border>

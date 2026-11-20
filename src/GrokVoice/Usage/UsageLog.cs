@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace GrokVoice.Usage;
 
-/// <summary>One billed xAI API call: a transcription (audio seconds) or a clean-up pass (tokens).</summary>
+/// <summary>One billed API call (xAI or ElevenLabs): a transcription (audio seconds) or a clean-up pass (tokens).</summary>
 internal sealed record UsageEntry(
     [property: JsonPropertyName("t")] DateTimeOffset Time,
     [property: JsonPropertyName("kind")] string Kind,
@@ -14,10 +14,12 @@ internal sealed record UsageEntry(
     [property: JsonPropertyName("out")] long OutputTokens,
     [property: JsonPropertyName("usd")] decimal Cost);
 
-/// <summary>Totals for a period.</summary>
-internal sealed record UsageTotals(int Dictations, double AudioSeconds, long InputTokens, long OutputTokens, decimal TranscribeCost, decimal CleanUpCost)
+/// <summary>Totals for a period. Transcription is split by provider: Grok (xAI) and ElevenLabs Scribe.</summary>
+internal sealed record UsageTotals(int Dictations, double AudioSeconds, long InputTokens, long OutputTokens, decimal TranscribeCost, decimal CleanUpCost,
+    double ScribeSeconds = 0, decimal ScribeCost = 0)
 {
     public decimal Cost => TranscribeCost + CleanUpCost;
+    public decimal GrokTranscribeCost => TranscribeCost - ScribeCost;
     public long Tokens => InputTokens + OutputTokens;
 }
 
@@ -63,7 +65,9 @@ internal sealed class UsageLog
 
     public void AddTranscription(string model, double audioSeconds) =>
         Add(new UsageEntry(DateTimeOffset.Now, "stt", model, audioSeconds, 0, 0,
-            Math.Round((decimal)audioSeconds / 3600m * (model.StartsWith("scribe", StringComparison.OrdinalIgnoreCase) ? ScribePerHour : TranscribePerHour), 8)));
+            Math.Round((decimal)audioSeconds / 3600m * (IsScribe(model) ? ScribePerHour : TranscribePerHour), 8)));
+
+    public static bool IsScribe(string model) => model.StartsWith("scribe", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>ElevenLabs Scribe v2 list price, US dollars per hour of audio.</summary>
     public const decimal ScribePerHour = 0.22m;
@@ -94,14 +98,18 @@ internal sealed class UsageLog
     {
         lock (_gate)
         {
-            int dictations = 0; double seconds = 0; long tin = 0, tout = 0; decimal stt = 0, polish = 0;
+            int dictations = 0; double seconds = 0, scribeSeconds = 0; long tin = 0, tout = 0; decimal stt = 0, polish = 0, scribe = 0;
             foreach (var e in _entries)
             {
                 if (e.Time < since) continue;
-                if (e.Kind == "stt") { dictations++; seconds += e.AudioSeconds; stt += e.Cost; }
+                if (e.Kind == "stt")
+                {
+                    dictations++; seconds += e.AudioSeconds; stt += e.Cost;
+                    if (IsScribe(e.Model)) { scribeSeconds += e.AudioSeconds; scribe += e.Cost; }
+                }
                 else { tin += e.InputTokens; tout += e.OutputTokens; polish += e.Cost; }
             }
-            return new(dictations, seconds, tin, tout, stt, polish);
+            return new(dictations, seconds, tin, tout, stt, polish, scribeSeconds, scribe);
         }
     }
 
@@ -115,9 +123,9 @@ internal sealed class UsageLog
     public string ToCsv()
     {
         var c = CultureInfo.InvariantCulture;
-        var lines = new List<string> { "time,kind,model,audio_seconds,input_tokens,output_tokens,cost_usd" };
+        var lines = new List<string> { "time,provider,kind,model,audio_seconds,input_tokens,output_tokens,cost_usd" };
         lock (_gate)
-            lines.AddRange(_entries.Select(e => string.Join(',', e.Time.ToString("o", c), e.Kind, e.Model,
+            lines.AddRange(_entries.Select(e => string.Join(',', e.Time.ToString("o", c), IsScribe(e.Model) ? "ElevenLabs" : "xAI", e.Kind, e.Model,
                 e.AudioSeconds.ToString("0.###", c), e.InputTokens.ToString(c), e.OutputTokens.ToString(c), e.Cost.ToString("0.########", c))));
         return string.Join("\n", lines) + "\n";
     }

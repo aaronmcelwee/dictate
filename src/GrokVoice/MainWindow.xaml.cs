@@ -513,7 +513,7 @@ public sealed partial class MainWindow : Window
             UsageGrid.Children.Add(block);
         }
         UsageGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        string[] headers = ["", "Dictations", "Audio", "Clean-up tokens", "Cost (USD)"];
+        string[] headers = ["", "Dictations", "Audio", "Grok", "ElevenLabs", "Clean-up", "Total (USD)"];
         for (var c = 0; c < headers.Length; c++) Cell(0, c, headers[c], header: true);
         for (var r = 0; r < rows.Length; r++)
         {
@@ -522,13 +522,16 @@ public sealed partial class MainWindow : Window
             Cell(r + 1, 0, rows[r].Name);
             Cell(r + 1, 1, t.Dictations.ToString("N0"));
             Cell(r + 1, 2, FormatAudio(t.AudioSeconds));
-            Cell(r + 1, 3, t.Tokens.ToString("N0"));
-            Cell(r + 1, 4, FormatCost(t.Cost), strong: true);
+            Cell(r + 1, 3, FormatCost(t.GrokTranscribeCost));
+            Cell(r + 1, 4, FormatCost(t.ScribeCost));
+            Cell(r + 1, 5, FormatCost(t.CleanUpCost));
+            Cell(r + 1, 6, FormatCost(t.Cost), strong: true);
         }
         var all = usage.AllTime;
-        UsageNote.Text = $"Transcription {FormatCost(all.TranscribeCost)} and clean-up {FormatCost(all.CleanUpCost)} all time "
-            + $"({all.InputTokens:N0} tokens in, {all.OutputTokens:N0} out). Counted from this version on, on this PC. "
-            + "Costs use xAI's own figure where the response gives one, else list prices. "
+        UsageNote.Text = $"All time: Grok speech to text {FormatCost(all.GrokTranscribeCost)} ({FormatAudio(all.AudioSeconds - all.ScribeSeconds)}), "
+            + $"ElevenLabs Scribe {FormatCost(all.ScribeCost)} ({FormatAudio(all.ScribeSeconds)}), "
+            + $"clean-up {FormatCost(all.CleanUpCost)} ({all.InputTokens:N0} tokens in, {all.OutputTokens:N0} out). Counted on this PC, benchmark runs included. "
+            + $"Grok costs use xAI's own figure where the response gives one, else list prices; ElevenLabs uses its list price of ${GrokVoice.Usage.UsageLog.ScribePerHour:0.00} an hour. "
             + "Messages to Grok Bot go through your Grok subscription and aren't billed here.";
     }
 
