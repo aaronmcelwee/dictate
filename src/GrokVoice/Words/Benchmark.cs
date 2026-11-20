@@ -50,6 +50,8 @@ internal static partial class Benchmark
         try
         {
             Directory.CreateDirectory(output);
+            // Benchmark calls are billed, but kept out of the dictation usage card: they go in their own log.
+            usage = new GrokVoice.Usage.UsageLog(output);
             var clips = Directory.GetFiles(input, "*.wav").OrderBy(p => p, StringComparer.Ordinal).ToList();
             Log.Write($"bench {clips.Count} clips");
             var rows = new List<Row>();

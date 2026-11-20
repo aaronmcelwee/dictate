@@ -530,7 +530,7 @@ public sealed partial class MainWindow : Window
         var all = usage.AllTime;
         UsageNote.Text = $"All time: Grok speech to text {FormatCost(all.GrokTranscribeCost)} ({FormatAudio(all.AudioSeconds - all.ScribeSeconds)}), "
             + $"ElevenLabs Scribe {FormatCost(all.ScribeCost)} ({FormatAudio(all.ScribeSeconds)}), "
-            + $"clean-up {FormatCost(all.CleanUpCost)} ({all.InputTokens:N0} tokens in, {all.OutputTokens:N0} out). Counted on this PC, benchmark runs included. "
+            + $"clean-up {FormatCost(all.CleanUpCost)} ({all.InputTokens:N0} tokens in, {all.OutputTokens:N0} out). Counted on this PC; benchmark runs from 0.2.59 on are logged separately. "
             + $"Grok costs use xAI's own figure where the response gives one, else list prices; ElevenLabs uses its list price of ${GrokVoice.Usage.UsageLog.ScribePerHour:0.00} an hour. "
             + "Messages to Grok Bot go through your Grok subscription and aren't billed here.";
     }
