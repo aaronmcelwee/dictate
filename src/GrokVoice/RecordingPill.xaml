@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="GrokVoice.RecordingPill"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Murmur">
+
+    <!-- A small dark capsule: just a live waveform while listening, growing to fit a message. -->
+    <!-- Shell is the window's content and is clipped by the window region; Root is the pill inside it.
+         Animations resize Root and the region only, not the window, so nothing shifts frame to frame. -->
+    <Grid x:Name="Shell" Background="#FF121212">
+    <Border x:Name="Root" Background="#FF121212" Padding="6,0,14,0" HorizontalAlignment="Center" VerticalAlignment="Bottom">
+        <Grid x:Name="Body" ColumnSpacing="8" VerticalAlignment="Center" Opacity="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Badge: the bot's character clip, a glyph, or nothing. -->
+            <Grid x:Name="Badge" Width="24" Height="24" VerticalAlignment="Center" Visibility="Collapsed">
+                <Border x:Name="AvatarFrame" CornerRadius="12" Visibility="Collapsed">
+                    <Grid>
+                        <MediaPlayerElement x:Name="Avatar" Stretch="UniformToFill" AreTransportControlsEnabled="False" />
+                        <!-- Video isn't clipped by rounded corners, so paint the pill's colour outside the circle. -->
+                        <Path Fill="#FF121212" IsHitTestVisible="False">
+                            <Path.Data>
+                                <GeometryGroup FillRule="EvenOdd">
+                                    <RectangleGeometry Rect="-1,-1,26,26" />
+                                    <EllipseGeometry Center="12,12" RadiusX="11.5" RadiusY="11.5" />
+                                </GeometryGroup>
+                            </Path.Data>
+                        </Path>
+                    </Grid>
+                </Border>
+                <FontIcon x:Name="BadgeGlyph" FontSize="14" Foreground="White" Visibility="Collapsed" />
+            </Grid>
+
+            <!-- Waveform: bars that follow the voice, centred. -->
+            <StackPanel x:Name="Wave" Grid.Column="1" Orientation="Horizontal" Spacing="2.5"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Height="16" />
+
+            <!-- Title: a short message, or who is talking in a conversation card. -->
+            <StackPanel x:Name="Message" Grid.Column="1" VerticalAlignment="Center" Visibility="Collapsed">
+                <TextBlock x:Name="TitleText" FontSize="13" FontWeight="SemiBold" Foreground="White"
+                           TextTrimming="CharacterEllipsis" MaxLines="1" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- Conversation: the bot's answers and your replies, newest at the bottom; scrolls when long. -->
+            <ScrollViewer x:Name="BodyScroll" Grid.Row="1" Grid.ColumnSpan="2" Margin="8,10,0,0"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+                <StackPanel x:Name="Turns" Spacing="10" Margin="0,0,8,0" />
+            </ScrollViewer>
+        </Grid>
+    </Border>
+    </Grid>
+</Window>
