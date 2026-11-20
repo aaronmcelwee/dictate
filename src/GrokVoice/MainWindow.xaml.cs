@@ -432,6 +432,12 @@ public sealed partial class MainWindow : Window
         _host.ElevenKeys.Set(key);
         ElevenKeyBox.Password = "";
         _host.Write("stt   ElevenLabs key saved");
+        // Saving a key means "use it": switch speech-to-text over (the picker can switch back).
+        _host.Settings.SpeechEngine = "elevenlabs";
+        _loading = true;
+        EngineBox.SelectedIndex = 1;
+        _loading = false;
+        _host.Write("stt   speech-to-text: elevenlabs");
         ShowElevenKeyState();
         _host.OnElevenKeySaved();
     }

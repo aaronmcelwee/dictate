@@ -283,6 +283,7 @@ internal sealed class DictationHost : IDisposable
         _diagnostics = NewDiagnosticsFolder();
         // No key terms for now: a hundred of them from the imported dictionary can pull the recognizer
         // towards unrelated words. The clean-up pass still uses the dictionary.
+        Write($"stt   {(Settings.SpeechEngine == "elevenlabs" && ElevenKeys.Get() is { Length: > 0 } ? "ElevenLabs Scribe" : "Grok")}");
         if (Settings.SpeechEngine == "elevenlabs" && ElevenKeys.Get() is { Length: > 0 } eleven)
             return new ElevenLabsTranscriber(new ElevenLabsSttOptions { ApiKey = eleven, Language = Settings.Language })
             {
