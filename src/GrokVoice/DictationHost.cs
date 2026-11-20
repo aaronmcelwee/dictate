@@ -317,16 +317,34 @@ internal sealed class DictationHost : IDisposable
     private Task<GrokVoice.Context.DictationContext>? _context;
 
     /// <summary>
-    /// An instruction for the bot that points at something on screen ("reply to this") gets the
-    /// nearby text appended, so the bot knows what "this" is.
+    /// Shapes an instruction for the bot. A quick capture ("remind me…", "add … to my list") is
+    /// marked so the bot files it and confirms briefly. An instruction about something on screen
+    /// ("summarize this", "draft a reply", "tell him") gets the selection and the nearby text
+    /// appended, so the bot knows what "this" is.
     /// </summary>
     private string WithScreenContext(string text)
     {
-        if (!Settings.ScreenContext || _context is not { IsCompletedSuccessfully: true } done) return text;
+        var capture = GrokVoice.Context.AppAwareness.IsCapture(text);
+        var message = capture
+            ? $"Quick capture from Grok Voice. File this as a reminder, task or list item as fits, then confirm in one short line:\n{text}"
+            : text;
+        if (!Settings.ScreenContext || _context is not { IsCompletedSuccessfully: true } done) return message;
         var context = done.Result;
-        if (context.Text.Length == 0 || !(context.IsReplyApp || GrokVoice.Context.AppAwareness.RefersToScreen(text))) return text;
+        if (context.Text.Length == 0 && context.Selection.Length == 0) return message;
+        // A capture only takes the screen along when it names it ("remind me to answer this email").
+        var wanted = capture
+            ? GrokVoice.Context.AppAwareness.NamesScreen(text)
+            : context.Selection.Length > 0 || context.IsReplyApp
+              || GrokVoice.Context.AppAwareness.ActsOnScreen(text) || GrokVoice.Context.AppAwareness.RefersToScreen(text);
+        if (!wanted) return message;
         var where = context.Title.Length > 0 ? $"{context.Process}: {context.Title}" : context.Process;
-        return $"{text}\n\n---\nContext from my screen ({where}):\n{context.Text}";
+        var result = new System.Text.StringBuilder(message).Append("\n\n---\n");
+        if (context.Selection.Length > 0)
+            result.Append($"What I have selected on my screen ({where}):\n{context.Selection}\n\n");
+        if (context.Text.Length > 0)
+            result.Append($"{(context.Selection.Length > 0 ? "Other text" : "Text")} on my screen ({where}, read {context.Source}):\n{context.Text}");
+        Write($"bot   {(capture ? "capture, " : "")}screen context: {context.Selection.Length} selected + {context.Text.Length} chars ({context.Source})");
+        return result.ToString().TrimEnd();
     }
 
     private void SaveResult(string heard, string delivered)
@@ -485,7 +503,7 @@ internal sealed class DictationHost : IDisposable
             case DictationStatus.Listening:
                 // Read the app and the text around the cursor while the user talks, so it's ready by the end.
                 _context = Settings.AppStyle || Settings.ScreenContext
-                    ? GrokVoice.Context.AppAwareness.CaptureAsync(_sink.Keyboard.Target, Settings.ScreenContext)
+                    ? GrokVoice.Context.AppAwareness.CaptureAsync(_sink.Keyboard.Target, Settings.ScreenContext, forBot: _owner == KeySource.Copilot)
                     : null;
                 if (_diagnostics is { } diag) _mic.BeginRaw(Path.Combine(diag, "device.wav"));
                 _sessionStart = _clock.Elapsed;

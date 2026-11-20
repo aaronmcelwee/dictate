@@ -11,7 +11,7 @@ namespace GrokVoice.Context;
 internal enum AppKind { Other, Email, Chat, Ai, Code, Document }
 
 /// <summary>The app a dictation started in and, when it was worth reading, the text around the cursor.</summary>
-internal sealed record DictationContext(string Process, string Title, AppKind Kind, string Source, string Text, long Milliseconds)
+internal sealed record DictationContext(string Process, string Title, AppKind Kind, string Source, string Text, long Milliseconds, string Selection = "")
 {
     public static readonly DictationContext None = new("", "", AppKind.Other, "none", "", 0);
 
@@ -28,13 +28,34 @@ internal sealed record DictationContext(string Process, string Title, AppKind Ki
 internal static partial class AppAwareness
 {
     private const int MaxChars = 1800;
+    /// <summary>An instruction for the bot ("summarize this") can use much more of the screen.</summary>
+    private const int BotMaxChars = 6000;
     private static readonly TimeSpan UiaBudget = TimeSpan.FromMilliseconds(450);
+    private static readonly TimeSpan BotUiaBudget = TimeSpan.FromMilliseconds(1500);
 
     [GeneratedRegex(@"\b(this|that|these|those|it|reply|respond|answer|above|below|here|him|her|them|they|he|she)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Reference();
 
     /// <summary>Whether a dictation points at something on screen ("reply to this", "tell him").</summary>
     public static bool RefersToScreen(string text) => Reference().IsMatch(text);
+
+    [GeneratedRegex(@"\b(this|the|that)\s+(e-?mail|page|message|thread|chat|conversation|doc|document|article|post|file|code|error|text|paragraph|selection|screen|window|tab|pdf|slide|spreadsheet|table)\b|\bon\s+(my|the)\s+screen\b|\b(selected|highlighted)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ScreenNoun();
+
+    [GeneratedRegex(@"\b(summari[sz]e|summary|tl;?dr|explain|translate|draft|rewrite|reword|proofread|fact[- ]check|critique|review|respond|reply|answer)\b|\bwhat\s+(does|is|are)\s+(this|that|these|it)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ScreenVerb();
+
+    /// <summary>Names something on screen outright ("this email", "on my screen", "the selected text").</summary>
+    public static bool NamesScreen(string text) => ScreenNoun().IsMatch(text);
+
+    /// <summary>An instruction to do something with what's on screen ("summarize this", "draft a reply").</summary>
+    public static bool ActsOnScreen(string text) => NamesScreen(text) || ScreenVerb().IsMatch(text);
+
+    [GeneratedRegex(@"^\W*(?:(?:hey\s+)?jeeves\W+)?(?:please\s+)?(?:remind\s+me|reminder\b|add\b.{1,80}?\b(?:to|on)\s+(?:my|the)\b.{0,40}?\blist\b|put\b.{1,80}?\bon\s+(?:my|the)\b.{0,40}?\blist\b|(?:make\s+a\s+)?note\s+(?:that|down|to\s+self)|make\s+a\s+note|jot\s+down|don'?t\s+let\s+me\s+forget|to-?\s?do\b|add\s+(?:a\s+)?task\b)", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex CapturePhrase();
+
+    /// <summary>A quick capture for the bot to file: "remind me…", "add … to my list", "note that…".</summary>
+    public static bool IsCapture(string text) => CapturePhrase().IsMatch(text);
 
     public static AppKind Classify(string process, string title)
     {
@@ -73,7 +94,7 @@ internal static partial class AppAwareness
     /// Reads the app and the text near the cursor in <paramref name="hwnd"/>. Runs off the UI thread and
     /// gives up on slow parts, so it never holds a dictation up.
     /// </summary>
-    public static Task<DictationContext> CaptureAsync(IntPtr hwnd, bool readScreen) => Task.Run(async () =>
+    public static Task<DictationContext> CaptureAsync(IntPtr hwnd, bool readScreen, bool forBot = false) => Task.Run(async () =>
     {
         var clock = Stopwatch.StartNew();
         try
@@ -81,16 +102,17 @@ internal static partial class AppAwareness
             if (hwnd == IntPtr.Zero) return DictationContext.None;
             var (process, title) = Describe(hwnd);
             var kind = Classify(process, title);
-            if (!readScreen || kind == AppKind.Code) return new DictationContext(process, title, kind, "app", "", clock.ElapsedMilliseconds);
+            if (!readScreen || (kind == AppKind.Code && !forBot)) return new DictationContext(process, title, kind, "app", "", clock.ElapsedMilliseconds);
 
-            var text = ReadWithUiAutomation(hwnd);
+            var max = forBot ? BotMaxChars : MaxChars;
+            var (text, selection) = ReadWithUiAutomation(hwnd, max, forBot ? BotUiaBudget : UiaBudget);
             var source = "uia";
-            if (text.Length < 200 && kind is AppKind.Email or AppKind.Chat or AppKind.Ai)
+            if (text.Length < 200 && (forBot || kind is AppKind.Email or AppKind.Chat or AppKind.Ai))
             {
                 var ocr = await ReadWithOcrAsync(hwnd).ConfigureAwait(false);
                 if (ocr.Length > text.Length) { text = ocr; source = "ocr"; }
             }
-            return new DictationContext(process, title, kind, text.Length == 0 ? "app" : source, Trim(text), clock.ElapsedMilliseconds);
+            return new DictationContext(process, title, kind, text.Length == 0 ? "app" : source, Trim(text, max), clock.ElapsedMilliseconds, Trim(selection, max));
         }
         catch (Exception e)
         {
@@ -124,12 +146,12 @@ internal static partial class AppAwareness
     /// Text near the focused element: its own text (a draft, a prompt box) and the readable text
     /// closest to it on screen, within a small time budget.
     /// </summary>
-    private static string ReadWithUiAutomation(IntPtr hwnd)
+    private static (string Text, string Selection) ReadWithUiAutomation(IntPtr hwnd, int max, TimeSpan budget)
     {
         _uia ??= new CUIAutomation8();
         var clock = Stopwatch.StartNew();
         var window = _uia.ElementFromHandle(hwnd);
-        if (window is null) return "";
+        if (window is null) return ("", "");
         var focused = _uia.GetFocusedElement();
         var anchor = window.CurrentBoundingRectangle;
         var near = (anchor.top + anchor.bottom) / 2.0;
@@ -140,10 +162,12 @@ internal static partial class AppAwareness
         }
 
         var pieces = new List<(double Distance, string Text)>();
+        var selection = "";
         if (focused is not null && focused.GetCurrentPropertyValue(UIA_IsPasswordPropertyId) is not true
             && focused.CurrentProcessId == window.CurrentProcessId)
         {
-            var own = TextOf(focused, 1200);
+            selection = SelectionOf(focused, max);
+            var own = TextOf(focused, Math.Min(max, 2500));
             if (own.Length > 0) pieces.Add((-1, own));
         }
 
@@ -152,7 +176,7 @@ internal static partial class AppAwareness
         var queue = new Queue<IUIAutomationElement>();
         queue.Enqueue(window);
         var visited = 0;
-        while (queue.Count > 0 && visited < 600 && clock.Elapsed < UiaBudget)
+        while (queue.Count > 0 && visited < (max > MaxChars ? 1500 : 600) && clock.Elapsed < budget)
         {
             var element = queue.Dequeue();
             visited++;
@@ -162,7 +186,7 @@ internal static partial class AppAwareness
             if (type is UIA_TextControlTypeId or UIA_DocumentControlTypeId or UIA_ListItemControlTypeId or UIA_DataItemControlTypeId
                 && element.GetCurrentPropertyValue(UIA_IsPasswordPropertyId) is not true)
             {
-                var text = type == UIA_DocumentControlTypeId ? TextOf(element, 2500) : (element.CurrentName ?? "").Trim();
+                var text = type == UIA_DocumentControlTypeId ? TextOf(element, Math.Max(2500, max)) : (element.CurrentName ?? "").Trim();
                 if (text.Length > 2)
                 {
                     var r = element.CurrentBoundingRectangle;
@@ -183,10 +207,26 @@ internal static partial class AppAwareness
         foreach (var (_, text) in pieces.OrderBy(p => p.Distance))
         {
             if (!seen.Add(text)) continue;
-            if (result.Length + text.Length > MaxChars * 2) break;
+            if (result.Length + text.Length > max * 2) break;
             result.AppendLine(text);
         }
-        return result.ToString();
+        return (result.ToString(), selection);
+    }
+
+    /// <summary>The text selected in the focused element, if it exposes one (documents, browsers, editors).</summary>
+    private static string SelectionOf(IUIAutomationElement element, int max)
+    {
+        try
+        {
+            if (element.GetCurrentPattern(UIA_TextPatternId) is not IUIAutomationTextPattern text) return "";
+            var ranges = text.GetSelection();
+            if (ranges is null) return "";
+            var parts = new List<string>();
+            for (var i = 0; i < ranges.Length; i++)
+                if ((ranges.GetElement(i).GetText(max) ?? "").Trim() is { Length: > 0 } part) parts.Add(part);
+            return string.Join("\n", parts);
+        }
+        catch (Exception) { return ""; }
     }
 
     private static string TextOf(IUIAutomationElement element, int max)
@@ -242,11 +282,11 @@ internal static partial class AppAwareness
     }
 
     /// <summary>Collapses whitespace and keeps the text to a few hundred tokens.</summary>
-    private static string Trim(string text)
+    private static string Trim(string text, int max)
     {
         var lines = text.Split('\n').Select(l => Regex.Replace(l, @"\s+", " ").Trim()).Where(l => l.Length > 0);
         var joined = string.Join("\n", lines);
-        return joined.Length <= MaxChars ? joined : joined[..MaxChars] + " …";
+        return joined.Length <= max ? joined : joined[..max] + " …";
     }
 
     private const int SRCCOPY = 0x00CC0020;

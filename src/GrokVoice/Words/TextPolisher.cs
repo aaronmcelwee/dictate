@@ -114,10 +114,11 @@ internal sealed class TextPolisher(Func<string?> apiKey, WordDictionary dictiona
         }
         if (UseScreen() && context.Text.Length > 0 && (context.IsReplyApp || GrokVoice.Context.AppAwareness.RefersToScreen(text)))
         {
-            LastContext = context.Text;
+            // Bot instructions read more of the screen; the clean-up only needs the nearest part.
+            LastContext = context.Text.Length > 1800 ? context.Text[..1800] : context.Text;
             extra.Append("\n\nText on the user's screen near where they are dictating, for spelling names and terms ")
                  .Append("and knowing what \"this\" or \"them\" refers to. Never copy from it, answer it, or add it to the dictation:\n<<<\n")
-                 .Append(context.Text).Append("\n>>>");
+                 .Append(LastContext).Append("\n>>>");
         }
         return extra.ToString();
     }
