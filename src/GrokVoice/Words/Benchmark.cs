@@ -15,15 +15,20 @@ namespace GrokVoice.Words;
 /// </summary>
 internal static partial class Benchmark
 {
+    private static int _running;
+
     public static string Root { get; } = Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "benchmark");
 
-    public static void StartIfRequested(Func<string?> apiKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
+    public static void StartIfRequested(Func<string?> apiKey, Func<string?> elevenKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
     {
         var input = Path.Combine(Root, "in");
         var output = Path.Combine(Root, "out");
         if (!Directory.Exists(input) || File.Exists(Path.Combine(output, "summary.json"))) return;
         if (apiKey() is not { Length: > 0 }) { Log.Write("bench no API key"); return; }
-        _ = Task.Run(() => RunAsync(input, output, apiKey, language, words, usage));
+        // A run prepared for ElevenLabs waits until its key is saved.
+        if (File.Exists(Path.Combine(input, "wait-for-elevenlabs")) && elevenKey() is not { Length: > 0 }) { Log.Write("bench waiting for the ElevenLabs key"); return; }
+        if (Interlocked.Exchange(ref _running, 1) == 1) return;
+        _ = Task.Run(async () => { try { await RunAsync(input, output, apiKey, elevenKey, language, words, usage); } finally { _running = 0; } });
     }
 
     private sealed record Row(string Id, string App, string Reference, bool Edited, string WisprAsr, string WisprFormatted,
@@ -36,13 +41,10 @@ internal static partial class Benchmark
     /// <summary>Speech-to-text settings tried besides the app's own, to find the most accurate.</summary>
     private static readonly (string Name, Func<XaiSttOptions, XaiSttOptions> Change, bool Keyterms)[] SttVariants =
     [
-        ("unformatted", o => o with { Format = false }, false),
-        ("padded_1s", o => o with { PadSeconds = 1.0 }, false),
-        ("auto_language", o => o with { Language = "" }, false),
         ("keyterms_40", o => o, true),
     ];
 
-    private static async Task RunAsync(string input, string output, Func<string?> apiKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
+    private static async Task RunAsync(string input, string output, Func<string?> apiKey, Func<string?> elevenKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
     {
         try
         {
@@ -54,7 +56,7 @@ internal static partial class Benchmark
             var tasks = clips.Select(async wav =>
             {
                 await gate.WaitAsync().ConfigureAwait(false);
-                try { return await RunOneAsync(wav, apiKey, language, words, usage).ConfigureAwait(false); }
+                try { return await RunOneAsync(wav, apiKey, elevenKey, language, words, usage).ConfigureAwait(false); }
                 finally { gate.Release(); }
             }).ToList();
             foreach (var row in await Task.WhenAll(tasks).ConfigureAwait(false)) rows.Add(row);
@@ -89,7 +91,9 @@ internal static partial class Benchmark
                         wispr_asr = Pooled(r => r.WisprAsr, Counts), wispr_formatted = Pooled(r => r.WisprFormatted, Counts),
                         grok_heard = Pooled(r => r.GrokHeard, Counts), grok_cleaned = Pooled(r => r.GrokCleaned, Counts),
                     },
-                    variant_wer_percent = SttVariants.ToDictionary(v => v.Name, v => Pooled(r => r.Variants.GetValueOrDefault(v.Name, ""), Counts)),
+                    variant_wer_percent = list.SelectMany(r => r.Variants.Keys).Distinct().ToDictionary(name => name, name => Pooled(r => r.Variants.GetValueOrDefault(name, ""), Counts)),
+                    variant_formatted_error_percent = list.SelectMany(r => r.Variants.Keys).Where(n => n.EndsWith("_cleaned")).Distinct()
+                        .ToDictionary(name => name, name => Pooled(r => r.Variants.GetValueOrDefault(name, ""), FormattedCounts)),
                     // Errors counting capitals and punctuation too: what the user would have to fix.
                     formatted_error_percent = new
                     {
@@ -122,7 +126,7 @@ internal static partial class Benchmark
         catch (Exception) { return ""; }
     }
 
-    private static async Task<Row> RunOneAsync(string wav, Func<string?> apiKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
+    private static async Task<Row> RunOneAsync(string wav, Func<string?> apiKey, Func<string?> elevenKey, string language, WordDictionary words, GrokVoice.Usage.UsageLog usage)
     {
         var id = Path.GetFileNameWithoutExtension(wav);
         string app = "", asr = "", formatted = "", edited = "";
@@ -169,6 +173,21 @@ internal static partial class Benchmark
                 UseScreen = () => false,
             };
             var cleaned = heard.Length == 0 ? "" : await polisher.PolishAsync(heard, CancellationToken.None).ConfigureAwait(false);
+            if (elevenKey() is { Length: > 0 } eleven)
+                foreach (var (name, terms) in new[] { ("elevenlabs", (IReadOnlyList<string>?)null), ("elevenlabs_keyterms", words.Keyterms().Take(40).ToList()) })
+                {
+                    try
+                    {
+                        await using var scribe = new ElevenLabsTranscriber(new ElevenLabsSttOptions { ApiKey = eleven, Language = language }, terms)
+                        { Billed = (model, s) => usage.AddTranscription(model, s) };
+                        await scribe.SendAudioAsync(pcm, CancellationToken.None).ConfigureAwait(false);
+                        var text = (await scribe.FinishAsync(CancellationToken.None).ConfigureAwait(false)).Trim();
+                        variants[name] = text;
+                        if (terms is null)
+                            variants["elevenlabs_cleaned"] = text.Length == 0 ? "" : await polisher.PolishAsync(text, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception e) { variants[name] = "ERROR: " + e.Message; }
+                }
             var row = new Row(id, app, reference, edited.Trim().Length > 0 && edited != formatted, asr, formatted, heard, cleaned, seconds, null);
             foreach (var (k, v) in variants) row.Variants[k] = v;
             return row;

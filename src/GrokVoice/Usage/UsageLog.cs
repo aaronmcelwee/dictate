@@ -63,7 +63,10 @@ internal sealed class UsageLog
 
     public void AddTranscription(string model, double audioSeconds) =>
         Add(new UsageEntry(DateTimeOffset.Now, "stt", model, audioSeconds, 0, 0,
-            Math.Round((decimal)audioSeconds / 3600m * TranscribePerHour, 8)));
+            Math.Round((decimal)audioSeconds / 3600m * (model.StartsWith("scribe", StringComparison.OrdinalIgnoreCase) ? ScribePerHour : TranscribePerHour), 8)));
+
+    /// <summary>ElevenLabs Scribe v2 list price, US dollars per hour of audio.</summary>
+    public const decimal ScribePerHour = 0.22m;
 
     /// <param name="reportedCost">xAI's own cost for the call, in dollars, when the response carries one.</param>
     public void AddCleanUp(string model, long inputTokens, long outputTokens, decimal? reportedCost)

@@ -73,7 +73,7 @@ internal sealed class DictationHost : IDisposable
 
         Bot.Replied += (name, reply) => _ui.TryEnqueue(() => OnBotReply(name, reply));
         Bot.NoReply += name => Write($"bot   no reply from {name} within 5 minutes");
-        GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), Settings.Language, Words, Usage);
+        GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), () => ElevenKeys.Get(), Settings.Language, Words, Usage);
         _pill.Clicked += () =>
         {
             if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
@@ -126,6 +126,11 @@ internal sealed class DictationHost : IDisposable
 
     public AppSettings Settings { get; } = new();
     public ApiKeyStore Keys { get; } = new();
+    /// <summary>A pending accuracy benchmark waits for this key, so start it once the key is saved.</summary>
+    public void OnElevenKeySaved() => GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), () => ElevenKeys.Get(), Settings.Language, Words, Usage);
+
+    /// <summary>ElevenLabs key, for Scribe speech-to-text when chosen in settings.</summary>
+    public ApiKeyStore ElevenKeys { get; } = new("elevenlabs-api-key");
     public ObservableCollection<string> Log { get; } = new();
     public DictationStatus Status => _controller.Status;
     public string? LastText { get; private set; }
@@ -278,6 +283,12 @@ internal sealed class DictationHost : IDisposable
         _diagnostics = NewDiagnosticsFolder();
         // No key terms for now: a hundred of them from the imported dictionary can pull the recognizer
         // towards unrelated words. The clean-up pass still uses the dictionary.
+        if (Settings.SpeechEngine == "elevenlabs" && ElevenKeys.Get() is { Length: > 0 } eleven)
+            return new ElevenLabsTranscriber(new ElevenLabsSttOptions { ApiKey = eleven, Language = Settings.Language })
+            {
+                Billed = (model, seconds) => Usage.AddTranscription(model, seconds),
+                DiagnosticsFolder = _diagnostics,
+            };
         return new XaiRestTranscriber(new XaiSttOptions { ApiKey = Keys.Get()!, Language = Settings.Language }, null,
             Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "last-dictation.wav"))
         {

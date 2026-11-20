@@ -2,11 +2,11 @@ using Windows.Security.Credentials;
 
 namespace GrokVoice.Platform;
 
-/// <summary>The xAI API key, kept in Windows Credential Manager for the signed-in user.</summary>
-internal sealed class ApiKeyStore
+/// <summary>An API key (xAI by default), kept in Windows Credential Manager for the signed-in user.</summary>
+internal sealed class ApiKeyStore(string userName = "xai-api-key")
 {
     private const string Resource = "Grok Voice";
-    private const string UserName = "xai-api-key";
+    private readonly string UserName = userName;
 
     private readonly PasswordVault _vault = new();
     private string? _cached;
@@ -42,7 +42,8 @@ internal sealed class ApiKeyStore
     {
         try
         {
-            foreach (var c in _vault.FindAllByResource(Resource)) _vault.Remove(c);
+            foreach (var c in _vault.FindAllByResource(Resource))
+                if (c.UserName == UserName) _vault.Remove(c);
         }
         catch (Exception)
         {

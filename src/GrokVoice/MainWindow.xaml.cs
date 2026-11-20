@@ -67,6 +67,8 @@ public sealed partial class MainWindow : Window
         foreach (var (name, code) in Languages)
             LanguageBox.Items.Add(new ComboBoxItem { Content = name, Tag = code });
         LanguageBox.SelectedIndex = Math.Max(0, Array.FindIndex(Languages, l => l.Code == _host.Settings.Language));
+        EngineBox.SelectedIndex = _host.Settings.SpeechEngine == "elevenlabs" ? 1 : 0;
+        ShowElevenKeyState();
         WarmMicSwitch.IsOn = _host.KeepMicWarm;
         RightAltSwitch.IsOn = _host.RightAltEnabled;
         PolishSwitch.IsOn = _host.Settings.PolishEnabled;
@@ -395,6 +397,49 @@ public sealed partial class MainWindow : Window
     {
         if (_loading) return;
         _host.RightAltEnabled = RightAltSwitch.IsOn;
+    }
+
+    private void EngineBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || EngineBox.SelectedItem is not ComboBoxItem { Tag: string engine }) return;
+        _host.Settings.SpeechEngine = engine;
+        _host.Write($"stt   speech-to-text: {engine}");
+        ShowElevenKeyState();
+    }
+
+    private void ShowElevenKeyState()
+    {
+        var saved = !string.IsNullOrWhiteSpace(_host.ElevenKeys.Get());
+        ElevenKeyState.Text = saved ? "Saved"
+            : _host.Settings.SpeechEngine == "elevenlabs" ? "Not set: using Grok until a key is saved" : "Not set";
+        RemoveElevenKeyButton.IsEnabled = saved;
+        ElevenKeyBox.PlaceholderText = saved ? "Saved. Paste a new key to replace it." : "sk_…";
+    }
+
+    private void SaveElevenKey_Click(object sender, RoutedEventArgs e) => SaveElevenKey();
+
+    private void ElevenKeyBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter) return;
+        e.Handled = true;
+        SaveElevenKey();
+    }
+
+    private void SaveElevenKey()
+    {
+        var key = ElevenKeyBox.Password.Trim();
+        if (key.Length == 0) return;
+        _host.ElevenKeys.Set(key);
+        ElevenKeyBox.Password = "";
+        _host.Write("stt   ElevenLabs key saved");
+        ShowElevenKeyState();
+        _host.OnElevenKeySaved();
+    }
+
+    private void RemoveElevenKey_Click(object sender, RoutedEventArgs e)
+    {
+        _host.ElevenKeys.Clear();
+        ShowElevenKeyState();
     }
 
     private void LanguageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

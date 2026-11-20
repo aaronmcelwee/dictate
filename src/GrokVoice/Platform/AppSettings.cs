@@ -79,6 +79,13 @@ internal sealed class AppSettings
         set => _values[nameof(RestingPill)] = value;
     }
 
+    /// <summary>Speech-to-text service: "grok" (xAI) or "elevenlabs" (Scribe).</summary>
+    public string SpeechEngine
+    {
+        get => Get(nameof(SpeechEngine), "grok");
+        set => _values[nameof(SpeechEngine)] = value;
+    }
+
     /// <summary>Two-letter language code for Grok, or empty to auto-detect.</summary>
     public string Language
     {
