@@ -11,8 +11,8 @@
   <Identity Name="GrokVoice" Publisher="CN=Dictate Dev" Version="0.1.0.0" />
 
   <Properties>
-    <DisplayName>Grok Voice</DisplayName>
-    <PublisherDisplayName>Grok Voice</PublisherDisplayName>
+    <DisplayName>Murmur</DisplayName>
+    <PublisherDisplayName>Murmur</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -27,7 +27,7 @@
   <Applications>
     <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="Grok Voice"
+        DisplayName="Murmur"
         Description="Hold Right Alt to dictate anywhere; hold the Copilot key to instruct your Grok Bot."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
@@ -39,20 +39,20 @@
       <Extensions>
         <uap:Extension Category="windows.protocol">
           <uap:Protocol Name="grokvoice-key">
-            <uap:DisplayName>Grok Voice Copilot key events</uap:DisplayName>
+            <uap:DisplayName>Murmur Copilot key events</uap:DisplayName>
           </uap:Protocol>
         </uap:Extension>
 
-        <!-- Off until the user turns on "Start with Windows" in Grok Voice's settings. -->
+        <!-- On by default (also switched on once for existing installs); the user can turn it off in settings. -->
         <uap5:Extension Category="windows.startupTask">
-          <uap5:StartupTask TaskId="GrokVoiceStartup" Enabled="false" DisplayName="Grok Voice" />
+          <uap5:StartupTask TaskId="GrokVoiceStartup" Enabled="true" DisplayName="Murmur" />
         </uap5:Extension>
 
         <!-- Makes Grok Voice selectable in Settings > Personalization > Text input > Customize Copilot key. -->
         <uap3:Extension Category="windows.appExtension">
           <uap3:AppExtension Name="com.microsoft.windows.copilotkeyprovider"
             Id="GrokVoice"
-            DisplayName="Grok Voice"
+            DisplayName="Murmur"
             Description="Tap to open Grok Bot, hold to give your main bot an instruction"
             PublicFolder="Public">
             <uap3:Properties>

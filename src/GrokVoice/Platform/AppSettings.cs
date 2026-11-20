@@ -44,6 +44,13 @@ internal sealed class AppSettings
         else _values["AvatarClip_" + botId] = path;
     }
 
+    /// <summary>Start with Windows was switched on once by default; after that it is the user's choice.</summary>
+    public bool StartupDefaulted
+    {
+        get => Get(nameof(StartupDefaulted), false);
+        set => _values[nameof(StartupDefaulted)] = value;
+    }
+
     /// <summary>Whether dictations get a clean-up pass from a fast Grok model before they are typed or sent.</summary>
     public bool PolishEnabled
     {

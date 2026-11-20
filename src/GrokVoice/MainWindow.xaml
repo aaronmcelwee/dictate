@@ -4,7 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:tk="using:CommunityToolkit.WinUI.Controls"
-    Title="Grok Voice">
+    Title="Murmur">
 
     <Window.SystemBackdrop>
         <MicaBackdrop />
@@ -22,15 +22,15 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Image Source="Assets/Square44x44Logo.png" Width="16" Height="16" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="Grok Voice" VerticalAlignment="Center"
+            <Image Source="Assets/TitleIcon.png" Width="16" Height="16" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="Murmur" VerticalAlignment="Center"
                        Style="{StaticResource CaptionTextBlockStyle}" />
         </Grid>
 
         <ScrollViewer Grid.Row="1">
             <StackPanel MaxWidth="1000" Padding="36,8,36,36" Spacing="4" HorizontalAlignment="Stretch">
 
-                <TextBlock Text="Grok Voice" Margin="0,0,0,16" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock Text="Murmur" Margin="0,0,0,16" Style="{StaticResource TitleTextBlockStyle}" />
 
                 <!-- How to use it, and what state it's in right now. -->
                 <Border Padding="20" Margin="0,0,0,8" CornerRadius="{StaticResource OverlayCornerRadius}"
@@ -139,14 +139,14 @@
                 </tk:SettingsCard>
 
                 <tk:SettingsCard Header="Microphone"
-                                 Description="Which microphone Grok Voice listens to. A built-in laptop mic sounds muffled with the lid closed; pick a headset or webcam mic then.">
+                                 Description="Which microphone Murmur listens to. A built-in laptop mic sounds muffled with the lid closed; pick a headset or webcam mic then.">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE720;" />
                     </tk:SettingsCard.HeaderIcon>
                     <ComboBox x:Name="MicBox" MinWidth="220" MaxWidth="320" SelectionChanged="MicBox_SelectionChanged" />
                 </tk:SettingsCard>
 
-                <tk:SettingsCard Header="Microphone privacy" Description="Choose which microphone Windows uses, and allow Grok Voice to use it."
+                <tk:SettingsCard Header="Microphone privacy" Description="Choose which microphone Windows uses, and allow Murmur to use it."
                                  IsClickEnabled="True" Click="MicPrivacy_Click">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE72E;" />
@@ -243,7 +243,7 @@
                 </tk:SettingsCard>
 
                 <tk:SettingsCard x:Name="CopilotKeyCard" Header="Customize Copilot key"
-                                 Description="Choose Grok Voice under Personalization > Text input."
+                                 Description="Choose Murmur under Personalization > Text input."
                                  IsClickEnabled="True" Click="CopilotKeySettings_Click">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE765;" />
@@ -292,14 +292,14 @@
                 <TextBlock Text="General" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />
 
                 <tk:SettingsCard Header="Start with Windows"
-                                 Description="Run Grok Voice in the background when you sign in, so the keys work right away.">
+                                 Description="Run Murmur in the background when you sign in, so the keys work right away.">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE768;" />
                     </tk:SettingsCard.HeaderIcon>
                     <ToggleSwitch x:Name="StartupSwitch" Toggled="StartupSwitch_Toggled" />
                 </tk:SettingsCard>
 
-                <tk:SettingsExpander Header="Last dictation" Description="What Grok Voice heard most recently.">
+                <tk:SettingsExpander Header="Last dictation" Description="What Murmur heard most recently.">
                     <tk:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE81C;" />
                     </tk:SettingsExpander.HeaderIcon>
@@ -329,8 +329,16 @@
                     </tk:SettingsExpander.Items>
                 </tk:SettingsExpander>
 
-                <tk:SettingsCard Header="Quit Grok Voice"
-                                 Description="Closing this window keeps Grok Voice running for the keys. Quit stops it until you open it again.">
+                <tk:SettingsCard x:Name="UpdatesCard" Header="Updates"
+                                 Description="New versions install in place while you're not dictating; Murmur restarts on its own.">
+                    <tk:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE895;" />
+                    </tk:SettingsCard.HeaderIcon>
+                    <Button x:Name="CheckUpdatesButton" Content="Check now" Click="CheckUpdates_Click" />
+                </tk:SettingsCard>
+
+                <tk:SettingsCard Header="Quit Murmur"
+                                 Description="Closing this window keeps Murmur running for the keys. Quit stops it until you open it again.">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE7E8;" />
                     </tk:SettingsCard.HeaderIcon>

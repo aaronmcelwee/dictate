@@ -179,7 +179,7 @@ internal sealed class GrokBotClient
     // A GrokBotService call on the Cursor backend (Connect protocol, JSON), renewing the sign-in once.
     private async Task<JsonNode?> BackendAsync(string method, JsonObject body, bool mutation, CancellationToken ct)
     {
-        var access = Read("access") ?? throw new TranscriptionException("Sign in to Grok Bot in Grok Voice's settings first.");
+        var access = Read("access") ?? throw new TranscriptionException("Sign in to Grok Bot in Murmur's settings first.");
         for (var attempt = 0; ; attempt++)
         {
             using var request = BackendRequest(method, access, body.ToJsonString());
@@ -268,7 +268,7 @@ internal sealed class GrokBotClient
         try
         {
             if (_gateway is { } raced) return raced;
-            var access = Read("access") ?? throw new TranscriptionException("Sign in to Grok Bot in Grok Voice's settings first.");
+            var access = Read("access") ?? throw new TranscriptionException("Sign in to Grok Bot in Murmur's settings first.");
             JsonNode? value;
             try
             {
@@ -306,7 +306,7 @@ internal sealed class GrokBotClient
 
     private async Task<string> RefreshAsync(CancellationToken ct)
     {
-        var refresh = Read("refresh") ?? throw new TranscriptionException("Sign in to Grok Bot again in Grok Voice's settings.");
+        var refresh = Read("refresh") ?? throw new TranscriptionException("Sign in to Grok Bot again in Murmur's settings.");
         var body = new JsonObject
         {
             ["client_id"] = OAuthClientId,
@@ -315,7 +315,7 @@ internal sealed class GrokBotClient
         };
         using var response = await Http.PostAsync($"{Backend}/oauth/token",
             new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new TranscriptionException("Your Grok Bot sign-in expired. Sign in again in Grok Voice's settings.");
+        if (!response.IsSuccessStatusCode) throw new TranscriptionException("Your Grok Bot sign-in expired. Sign in again in Murmur's settings.");
         var value = await ReadJsonAsync(response, mutation: false, ct).ConfigureAwait(false);
         var access = Required(value, "access_token");
         var newRefresh = value?["refresh_token"]?.GetValue<string>();
@@ -350,7 +350,7 @@ internal sealed class GrokBotClient
             var status = (int)response.StatusCode;
             throw new TranscriptionException(mutation && status >= 500
                 ? "Couldn't tell whether Grok Bot got the instruction. Check Grok Bot before sending it again."
-                : status is 401 or 403 ? "Grok Bot refused the request. Sign in again in Grok Voice's settings."
+                : status is 401 or 403 ? "Grok Bot refused the request. Sign in again in Murmur's settings."
                 : $"Grok Bot returned HTTP {status}.");
         }
         try
@@ -359,7 +359,7 @@ internal sealed class GrokBotClient
         }
         catch (JsonException)
         {
-            throw new TranscriptionException("Grok Bot sent a response Grok Voice couldn't read.");
+            throw new TranscriptionException("Grok Bot sent a response Murmur couldn't read.");
         }
     }
 

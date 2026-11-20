@@ -45,6 +45,6 @@ Write-Host "Installing $($msix.Name)"
 Add-AppxPackage -Path $msix.FullName -ForceUpdateFromAnyVersion
 
 Write-Host ""
-Write-Host "Done. Open Grok Voice from Start, add your xAI API key, and set"
-Write-Host "Settings > Personalization > Text input > Customize Copilot key to 'Grok Voice'."
-Write-Host "Quit Wispr Flow or move it off Right Alt, since Grok Voice now uses Right Alt."
+Write-Host "Done. Open Murmur from Start, add your xAI API key, and set"
+Write-Host "Settings > Personalization > Text input > Customize Copilot key to 'Murmur'."
+Write-Host "Quit Wispr Flow or move it off Right Alt, since Murmur now uses Right Alt."

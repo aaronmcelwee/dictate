@@ -25,6 +25,30 @@ public partial class App : Application
         var current = AppInstance.GetCurrent();
         current.Activated += (_, a) => _window.DispatcherQueue.TryEnqueue(() => HandleActivation(a, redirected: true));
         HandleActivation(current.GetActivatedEventArgs(), redirected: false);
+        _ = EnableStartupOnceAsync();
+    }
+
+    /// <summary>
+    /// Starts with Windows by default: switched on once, the first time this version runs. If the user
+    /// turns it off later (here or in Settings > Apps > Startup), that choice stands.
+    /// </summary>
+    private async Task EnableStartupOnceAsync()
+    {
+        if (_host!.Settings.StartupDefaulted) return;
+        try
+        {
+            var task = await Windows.ApplicationModel.StartupTask.GetAsync("GrokVoiceStartup");
+            if (task.State == Windows.ApplicationModel.StartupTaskState.Disabled)
+            {
+                var state = await task.RequestEnableAsync();
+                _host.Write($"start with Windows: {state}");
+            }
+            _host.Settings.StartupDefaulted = true;
+        }
+        catch (Exception e)
+        {
+            _host.Write($"start with Windows failed: {e.Message}");
+        }
     }
 
     private void HandleActivation(AppActivationArguments args, bool redirected)
@@ -44,6 +68,11 @@ public partial class App : Application
             // Signed in with "Start with Windows" on: stay in the background.
             case ExtendedActivationKind.StartupTask:
                 _host!.Write("start at sign-in");
+                break;
+
+            // Windows restarted Murmur after an in-place update: stay in the background.
+            case ExtendedActivationKind.Launch when !redirected && Environment.CommandLine.Contains("--updated"):
+                _host!.ShowUpdated();
                 break;
 
             default:

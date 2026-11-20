@@ -118,7 +118,7 @@ public sealed class ElevenLabsTranscriber(ElevenLabsSttOptions options, IReadOnl
             if (!response.IsSuccessStatusCode)
                 throw new TranscriptionException((int)response.StatusCode switch
                 {
-                    401 or 403 => "ElevenLabs refused the API key. Check it in Grok Voice's settings (it needs Speech to Text access).",
+                    401 or 403 => "ElevenLabs refused the API key. Check it in Murmur's settings (it needs Speech to Text access).",
                     429 => "ElevenLabs is rate limiting; try again in a moment.",
                     _ => $"ElevenLabs transcription error (HTTP {(int)response.StatusCode}): {(json.Length > 300 ? json[..300] : json)}",
                 });

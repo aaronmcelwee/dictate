@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <Content Include="Assets\*.png" />
+    <Content Include="Assets\AppIcon.ico" />
     <Content Include="Public\**" />
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>

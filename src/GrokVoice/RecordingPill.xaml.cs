@@ -20,7 +20,13 @@ public sealed partial class RecordingPill : Window
     /// <summary>What the pill is listening for, which sets its badge.</summary>
     public enum ListenMode { Cursor, HandsFree, Bot }
 
-    private const double HeightDip = 32;
+    private const double HeightDip = 36;
+    /// <summary>The badge (bot clip or glyph) and the even inset around it inside the capsule.</summary>
+    private const double BadgeDip = 24;
+    private const double InsetDip = (HeightDip - BadgeDip) / 2;
+    /// <summary>Side padding where text or the waveform meets the capsule's round end, and inside cards.</summary>
+    private const double SideDip = 14;
+    private const double GapDip = 8;
     private const double MaxReplyHeightDip = 420;
     private const double BottomMarginDip = 28;
     private const double MaxWidthDip = 400;
@@ -29,12 +35,14 @@ public sealed partial class RecordingPill : Window
     private static readonly Windows.Foundation.Size RestSize = new(40, 6);
     private static readonly Windows.UI.Color PillColor = Windows.UI.Color.FromArgb(255, 18, 18, 18);
     private static readonly Windows.UI.Color RestColor = Windows.UI.Color.FromArgb(255, 64, 64, 64);
-    private static readonly TimeSpan ResizeTime = TimeSpan.FromMilliseconds(180);
-    private static readonly TimeSpan FadeTime = TimeSpan.FromMilliseconds(140);
+    private static readonly TimeSpan ResizeTime = TimeSpan.FromMilliseconds(240);
+    private static readonly TimeSpan FadeTime = TimeSpan.FromMilliseconds(160);
+    /// <summary>Content fades in once the capsule is most of the way open, so it never shows half-clipped.</summary>
+    private static readonly TimeSpan FadeDelay = TimeSpan.FromMilliseconds(90);
 
     private readonly IntPtr _hwnd;
     private readonly DispatcherQueueTimer _hideTimer;
-    private readonly DispatcherQueueTimer _frame;
+    private readonly FrameClock _frame;
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private readonly Microsoft.UI.Xaml.Shapes.Rectangle[] _bars = new Microsoft.UI.Xaml.Shapes.Rectangle[BarCount];
     private readonly double[] _barHeight = new double[BarCount];
@@ -108,10 +116,8 @@ public sealed partial class RecordingPill : Window
         _hideTimer.IsRepeating = false;
         _hideTimer.Tick += (_, _) => Hide();
 
-        _frame = DispatcherQueue.CreateTimer();
-        _frame.Interval = TimeSpan.FromMilliseconds(16);
-        _frame.IsRepeating = true;
-        _frame.Tick += (_, _) => Animate();
+        // Frames follow the compositor (vsync) instead of a 16 ms timer, which drifts against the display.
+        _frame = new FrameClock(Animate);
 
         // Closing would destroy the window; it is only ever parked.
         AppWindow.Closing += (_, e) => e.Cancel = true;
@@ -188,9 +194,10 @@ public sealed partial class RecordingPill : Window
         Wave.Visibility = Visibility.Visible;
         Message.Visibility = Visibility.Collapsed;
         BodyScroll.Visibility = Visibility.Collapsed;
-        Body.VerticalAlignment = VerticalAlignment.Center;
-        Body.Margin = new Thickness(0);
-        Present(nearWindow, new(Badge.Visibility == Visibility.Visible ? 120 : 88, HeightDip));
+        var badge = Badge.Visibility == Visibility.Visible;
+        // With a badge, the same space on the right keeps the waveform centred in the capsule.
+        Wave.Margin = new Thickness(0, 0, badge ? BadgeDip + GapDip : 0, 0);
+        Present(nearWindow, PillSize(badge, WaveWidth + (badge ? BadgeDip + GapDip : 0)));
     }
 
     /// <summary>Live text isn't shown: the pill stays a waveform, like a recording light.</summary>
@@ -214,7 +221,7 @@ public sealed partial class RecordingPill : Window
     public void ShowError(string message, IntPtr nearWindow)
     {
         _conversation = false;
-        ShowMessage("Grok Voice", message, "\uE783", nearWindow, TimeSpan.FromSeconds(6));
+        ShowMessage("Murmur", message, "\uE783", nearWindow, TimeSpan.FromSeconds(6));
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 153, 164));
     }
 
@@ -342,8 +349,6 @@ public sealed partial class RecordingPill : Window
             BadgeGlyph.Visibility = Visibility.Visible;
         }
         Badge.Visibility = Visibility.Visible;
-        Badge.VerticalAlignment = VerticalAlignment.Center;
-        Badge.Margin = new Thickness(0);
         Wave.Visibility = Visibility.Collapsed;
         Message.Visibility = Visibility.Visible;
         TitleText.Text = title;
@@ -354,13 +359,15 @@ public sealed partial class RecordingPill : Window
     private void FitCard(IntPtr nearWindow)
     {
         // Padding, header row, gap, conversation, padding, and slack so the last line never clips.
-        const double frame = 14 + 24 + 10 + 14 + 4;
-        Turns.Measure(new(ReplyWidthDip - 14 - 14, double.PositiveInfinity));
+        // The header badge sits at the same inset from the top and left as in the capsule.
+        const double frame = InsetDip + BadgeDip + 10 + SideDip + 4;
+        Turns.Measure(new(ReplyWidthDip - SideDip - SideDip, double.PositiveInfinity));
         var height = Math.Clamp(frame + Turns.DesiredSize.Height, HeightDip, MaxReplyHeightDip);
         BodyScroll.MaxHeight = height - frame;
+        BodyScroll.Margin = new Thickness(SideDip - InsetDip, 10, 0, 0);
         Body.VerticalAlignment = VerticalAlignment.Top;
-        Body.Margin = new Thickness(0, 14, 0, 14);
         var size = new Windows.Foundation.Size(ReplyWidthDip, height);
+        Layout(size, card: true, badge: true);
         if (_onScreen && !_hiding && _look != Look.Rest && _size.Height >= HeightDip && _size.Width >= ReplyWidthDip - 1) Resize(size);
         else Present(nearWindow, size);
         _frame.Start();
@@ -389,7 +396,7 @@ public sealed partial class RecordingPill : Window
         if (!_onScreen) return;
         // Shrink and fade, then park off screen (see Animate).
         _hiding = true;
-        Resize(new(48, HeightDip));
+        Resize(new(HeightDip * 1.5, HeightDip));
     }
 
     private bool _resting;
@@ -457,8 +464,6 @@ public sealed partial class RecordingPill : Window
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
         BadgeGlyph.Visibility = Visibility.Visible;
         Badge.Visibility = Visibility.Visible;
-        Badge.VerticalAlignment = VerticalAlignment.Center;
-        Badge.Margin = new Thickness(0);
         Wave.Visibility = Visibility.Collapsed;
         Message.Visibility = Visibility.Visible;
         TitleText.Text = title;
@@ -473,16 +478,10 @@ public sealed partial class RecordingPill : Window
             _hideTimer.Start();
             return;
         }
-        Windows.Foundation.Size size;
-        {
-            BodyScroll.Visibility = Visibility.Collapsed;
-            Body.VerticalAlignment = VerticalAlignment.Center;
-            Body.Margin = new Thickness(0);
-            _measure.Text = title;
-            _measure.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
-            size = new(Math.Clamp(_measure.DesiredSize.Width + 14 + 24 + 10 + 14 + 6, 112, MaxWidthDip), HeightDip);
-        }
-        Present(nearWindow, size);
+        BodyScroll.Visibility = Visibility.Collapsed;
+        _measure.Text = title;
+        _measure.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
+        Present(nearWindow, PillSize(badge: true, Math.Ceiling(_measure.DesiredSize.Width) + 1));
         _hideTimer.Interval = showFor;
         _hideTimer.Start();
     }
@@ -505,11 +504,12 @@ public sealed partial class RecordingPill : Window
     private void Present(IntPtr nearWindow, Windows.Foundation.Size size)
     {
         _hiding = false;
+        if (size.Height <= HeightDip) Layout(size, card: false, badge: Badge.Visibility == Visibility.Visible);
         Paint(PillColor);
         if (!_onScreen)
         {
             Locate(nearWindow);
-            _size = new(48, HeightDip);
+            _size = new(HeightDip * 1.5, HeightDip);
             _onScreen = true;
             Apply(_size, topmost: true);
         }
@@ -520,9 +520,47 @@ public sealed partial class RecordingPill : Window
             Apply(_size, topmost: true);
         }
         Body.Opacity = 0;
-        _fadeStart = _clock.Elapsed.TotalMilliseconds;
+        _fadeStart = _clock.Elapsed.TotalMilliseconds + FadeDelay.TotalMilliseconds;
         Resize(size);
         _frame.Start();
+    }
+
+    private const double WaveWidth = BarCount * 3 + (BarCount - 1) * 2.5;
+
+    /// <summary>
+    /// The capsule for one row of content: an even inset around the badge on the left, the usual side
+    /// padding on the right (both sides without a badge).
+    /// </summary>
+    private static Windows.Foundation.Size PillSize(bool badge, double content)
+    {
+        var width = (badge ? InsetDip + BadgeDip + GapDip : SideDip) + content + SideDip;
+        return new(Math.Clamp(Math.Round(width), HeightDip * 2, MaxWidthDip), HeightDip);
+    }
+
+    /// <summary>
+    /// Pins the content to its final size and padding before the capsule opens, so it stays still
+    /// while the window region reveals it instead of re-centring every frame.
+    /// </summary>
+    private void Layout(Windows.Foundation.Size size, bool card, bool badge)
+    {
+        // Grid spacing applies even next to an empty column, which would push a lone waveform off centre.
+        Body.ColumnSpacing = badge ? GapDip : 0;
+        Badge.Width = Badge.Height = BadgeDip;
+        Badge.VerticalAlignment = VerticalAlignment.Center;
+        if (card)
+        {
+            Root.Padding = new Thickness(InsetDip, 0, SideDip, 0);
+            Body.Margin = new Thickness(0, InsetDip, 0, SideDip);
+            Body.VerticalAlignment = VerticalAlignment.Top;
+        }
+        else
+        {
+            Root.Padding = new Thickness(badge ? InsetDip : SideDip, 0, SideDip, 0);
+            Body.Margin = new Thickness(0);
+            Body.VerticalAlignment = VerticalAlignment.Center;
+        }
+        Body.Width = Math.Max(0, size.Width - Root.Padding.Left - Root.Padding.Right);
+        Body.HorizontalAlignment = HorizontalAlignment.Center;
     }
 
     private void Locate(IntPtr nearWindow)
@@ -551,7 +589,8 @@ public sealed partial class RecordingPill : Window
 
         // Size: ease out towards the target.
         var t = Math.Clamp((now - _resizeStart) / ResizeTime.TotalMilliseconds, 0, 1);
-        var e = 1 - Math.Pow(1 - t, 3);
+        // Ease out (exponential-like): quick to open, a long soft landing with no visible stop.
+        var e = t >= 1 ? 1 : 1 - Math.Pow(2, -10 * t) * (1 - t);
         var size = new Windows.Foundation.Size(
             _fromSize.Width + (_toSize.Width - _fromSize.Width) * e,
             _fromSize.Height + (_toSize.Height - _fromSize.Height) * e);
@@ -561,6 +600,7 @@ public sealed partial class RecordingPill : Window
 
         // Content fades in after a change, and out while hiding.
         var f = Math.Clamp((now - _fadeStart) / FadeTime.TotalMilliseconds, 0, 1);
+        f = f * f * (3 - 2 * f);
         Body.Opacity = _hiding || _look == Look.Rest ? Math.Min(Body.Opacity, 1 - t) : f;
 
         if (_hiding && t >= 1)
@@ -650,7 +690,8 @@ public sealed partial class RecordingPill : Window
         Root.Margin = new Thickness(0, 0, 0, lift / _scale);
         var x = left + (boxW - width) / 2;
         var y = top + boxH - height - (int)Math.Round(lift);
-        var radius = Math.Min(size.Height / 2, 16);
+        // Cards round at the capsule's own radius, so the header badge sits concentric in the corner.
+        var radius = Math.Min(size.Height / 2, HeightDip / 2);
         var d = (int)Math.Round(radius * 2 * _scale);
         SetWindowRgn(_hwnd, CreateRoundRectRgn(x, y, x + width + 1, y + height + 1, d, d), true);
     }
@@ -773,4 +814,26 @@ public sealed partial class RecordingPill : Window
 
     [DllImport("shcore.dll")]
     private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+}
+
+/// <summary>Calls back once per composed frame (vsync) while started.</summary>
+internal sealed class FrameClock(Action tick)
+{
+    public bool IsRunning { get; private set; }
+
+    public void Start()
+    {
+        if (IsRunning) return;
+        IsRunning = true;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
+    }
+
+    public void Stop()
+    {
+        if (!IsRunning) return;
+        IsRunning = false;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
+    }
+
+    private void OnRendering(object? sender, object e) => tick();
 }

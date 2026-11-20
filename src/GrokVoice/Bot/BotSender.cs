@@ -27,7 +27,7 @@ internal sealed class BotSender(DictationHost host) : IBotSender
     public async Task SendAsync(string text, CancellationToken ct)
     {
         if (!Client.IsSignedIn)
-            throw new TranscriptionException("Sign in to Grok Bot under Main bot in Grok Voice's settings first.");
+            throw new TranscriptionException("Sign in to Grok Bot under Main bot in Murmur's settings first.");
 
         var id = host.Settings.BotId;
         if (id.Length == 0)
@@ -35,7 +35,7 @@ internal sealed class BotSender(DictationHost host) : IBotSender
             var bots = await Client.ListBotsAsync(ct).ConfigureAwait(false);
             var main = DefaultBot(bots) ?? throw new TranscriptionException(bots.Count == 0
                 ? "Your Grok Bot account has no bots yet."
-                : "Pick your main bot under Main bot in Grok Voice's settings.");
+                : "Pick your main bot under Main bot in Murmur's settings.");
             Choose(main);
             id = main.Id;
         }

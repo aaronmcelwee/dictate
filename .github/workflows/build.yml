@@ -31,11 +31,27 @@ jobs:
           dotnet-version: 9.0.x
       - uses: microsoft/setup-msbuild@v2
 
-      # Throwaway certificate per run, used from the user store by thumbprint; only its public .cer is published.
-      - name: Create signing certificate
+      # Signing certificate. With the MURMUR_SIGNING_PFX secret set, every build is signed with the same
+      # certificate, so an installed Murmur can update itself in place. Without it, a throwaway one per run.
+      # Only the public .cer is published.
+      - name: Signing certificate
         shell: pwsh
+        env:
+          PFX: ${{ secrets.MURMUR_SIGNING_PFX }}
+          PFX_PASSWORD: ${{ secrets.MURMUR_SIGNING_PFX_PASSWORD }}
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
+          if ($env:PFX) {
+            $path = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+            [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:PFX))
+            $secure = ConvertTo-SecureString $env:PFX_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation 'Cert:\CurrentUser\My' -Password $secure
+            Remove-Item $path
+            Export-Certificate -Cert $cert -FilePath out\Dictate-Dev.cer | Out-Null
+            "SIGNING_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+            Write-Host "Signing with the fixed certificate $($cert.Thumbprint)"
+            exit 0
+          }
           $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=Dictate Dev' -KeyUsage DigitalSignature `
             -FriendlyName 'Dictate Dev' -CertStoreLocation 'Cert:\CurrentUser\My' `
             -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
@@ -68,3 +84,39 @@ jobs:
         with:
           name: ${{ matrix.project == 'FlowKey' && 'flowkey' || matrix.project == 'GrokVoice' && 'grokvoice' || 'dictate' }}-${{ matrix.platform }}
           path: out/
+
+  # Publishes Murmur (the GrokVoice project) to the "murmur-latest" release, where the installed app
+  # looks for updates. Only builds signed with the fixed certificate are published.
+  publish:
+    needs: app
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    env:
+      HAS_CERT: ${{ secrets.MURMUR_SIGNING_PFX != '' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download packages
+        if: env.HAS_CERT == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: grokvoice-*
+          path: artifacts
+      - name: Publish release
+        if: env.HAS_CERT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="0.2.${{ github.run_number }}.0"
+          mkdir -p release
+          cp "$(find artifacts/grokvoice-ARM64 -name "GrokVoice_*_arm64.msix" | head -1)" release/Murmur_arm64.msix
+          cp "$(find artifacts/grokvoice-x64 -name "GrokVoice_*_x64.msix" | head -1)" release/Murmur_x64.msix
+          cp "$(find artifacts/grokvoice-ARM64 -name "Dictate-Dev.cer" | head -1)" release/Murmur.cer
+          printf '{"version":"%s","arm64":"Murmur_arm64.msix","x64":"Murmur_x64.msix","commit":"%s"}\n' "$version" "${{ github.event.pull_request.head.sha || github.sha }}" > release/latest.json
+          repo="${{ github.repository }}"
+          if ! gh release view murmur-latest --repo "$repo" >/dev/null 2>&1; then
+            gh release create murmur-latest --repo "$repo" --prerelease --title "Murmur (latest build)" \
+              --notes "Latest Murmur build. The installed app updates itself from here." --target "${{ github.sha }}"
+          fi
+          gh release upload murmur-latest --repo "$repo" --clobber release/*

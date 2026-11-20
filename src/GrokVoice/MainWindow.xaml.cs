@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         AppWindow.Resize(new Windows.Graphics.SizeInt32(900, 900));
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -78,6 +79,8 @@ public sealed partial class MainWindow : Window
         ShowMicrophones();
         ShowUsage();
         _host.Usage.Changed += () => DispatcherQueue.TryEnqueue(ShowUsage);
+        _host.Updates.StatusChanged += () => DispatcherQueue.TryEnqueue(ShowUpdateStatus);
+        ShowUpdateStatus();
         ShowDictionary();
         ShowBotState();
         ShowApiKeyState();
@@ -141,11 +144,11 @@ public sealed partial class MainWindow : Window
 
         KeyBar.IsOpen = !ours;
         KeyBar.Severity = InfoBarSeverity.Warning;
-        KeyBar.Title = "The Copilot key isn't set to Grok Voice";
-        KeyBar.Message = "Open Customize Copilot key below and choose Grok Voice. Right Alt works either way.";
+        KeyBar.Title = "The Copilot key isn't set to Murmur";
+        KeyBar.Message = "Open Customize Copilot key below and choose Murmur. Right Alt works either way.";
         CopilotKeyCard.Description = ours
-            ? "Grok Voice owns the Copilot key."
-            : "Choose Grok Voice under Personalization > Text input.";
+            ? "Murmur owns the Copilot key."
+            : "Choose Murmur under Personalization > Text input.";
     }
 
     private void SaveKey_Click(object sender, RoutedEventArgs e) => SaveKey();
@@ -382,7 +385,7 @@ public sealed partial class MainWindow : Window
         var added = _host.Words.Merge(entries);
         _host.Write($"dict  imported {entries.Count} entries, {added} new");
         ShowDictionaryBar(InfoBarSeverity.Success, "Imported",
-            $"{entries.Count} entries read, {added} new. Grok Voice now uses them for every dictation.");
+            $"{entries.Count} entries read, {added} new. Murmur now uses them for every dictation.");
     }
 
     private void ShowDictionaryBar(InfoBarSeverity severity, string title, string message)
@@ -584,7 +587,7 @@ public sealed partial class MainWindow : Window
             var state = await task.RequestEnableAsync();
             if (state == StartupTaskState.DisabledByUser)
             {
-                ErrorBar.Message = "Windows has Grok Voice turned off as a startup app. Turn it on in Settings > Apps > Startup.";
+                ErrorBar.Message = "Windows has Murmur turned off as a startup app. Turn it on in Settings > Apps > Startup.";
                 ErrorBar.IsOpen = true;
             }
         }
@@ -593,6 +596,22 @@ public sealed partial class MainWindow : Window
             task.Disable();
         }
         await LoadStartupStateAsync();
+    }
+
+    private void ShowUpdateStatus()
+    {
+        var version = $"Version {GrokVoice.Platform.Updater.Current.ToString(3)}";
+        var status = _host.Updates.Status;
+        UpdatesCard.Description = status.Length > 0 && !status.StartsWith("Up to date")
+            ? $"{version}. {status}"
+            : $"{version}, up to date as of the last check. New versions install in place while you're not dictating; Murmur restarts on its own.";
+    }
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdatesButton.IsEnabled = false;
+        try { await _host.Updates.CheckAsync(manual: true); }
+        finally { CheckUpdatesButton.IsEnabled = true; ShowUpdateStatus(); }
     }
 
     private async void CopilotKeySettings_Click(object sender, RoutedEventArgs e) =>

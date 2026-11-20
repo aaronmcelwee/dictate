@@ -137,7 +137,7 @@ public sealed class XaiRestTranscriber(XaiSttOptions options, IReadOnlyList<stri
             if (!response.IsSuccessStatusCode)
                 throw new TranscriptionException((int)response.StatusCode switch
                 {
-                    401 or 403 => "Grok refused the API key. Check it in Grok Voice's settings.",
+                    401 or 403 => "Grok refused the API key. Check it in Murmur's settings.",
                     429 => "Grok is rate limiting; try again in a moment.",
                     _ => $"Grok transcription error (HTTP {(int)response.StatusCode}): {Trim(json)}",
                 });

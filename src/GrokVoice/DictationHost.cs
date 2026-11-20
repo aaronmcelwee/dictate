@@ -74,6 +74,8 @@ internal sealed class DictationHost : IDisposable
         Bot.Replied += (name, reply) => _ui.TryEnqueue(() => OnBotReply(name, reply));
         Bot.NoReply += name => Write($"bot   no reply from {name} within 5 minutes");
         GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), () => ElevenKeys.Get(), Settings.Language, Words, Usage);
+        Updates = new Updater(this);
+        Updates.Start();
         _pill.Clicked += () =>
         {
             if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
@@ -133,6 +135,22 @@ internal sealed class DictationHost : IDisposable
     public ApiKeyStore ElevenKeys { get; } = new("elevenlabs-api-key", "Grok Voice ElevenLabs");
     public ObservableCollection<string> Log { get; } = new();
     public DictationStatus Status => _controller.Status;
+
+    public Updater Updates { get; }
+
+    private TimeSpan _lastActive;
+
+    /// <summary>Nothing in progress and nothing used for a minute, so an update won't interrupt.</summary>
+    public bool IdleForUpdate => _controller.Status == DictationStatus.Idle && _owner is null
+        && _clock.Elapsed - _lastActive > TimeSpan.FromMinutes(1);
+
+    /// <summary>After an in-place update, a short note on the pill.</summary>
+    public void ShowUpdated() => _ui.TryEnqueue(() =>
+    {
+        var v = Updater.Current;
+        Write($"updated to {v}");
+        _pill.ShowInfo($"Murmur updated to {v.ToString(3)}", IntPtr.Zero);
+    });
     public string? LastText { get; private set; }
     public IntPtr MainWindowHandle { get; set; }
 
@@ -150,7 +168,7 @@ internal sealed class DictationHost : IDisposable
 
     /// <summary>What has to be set up before dictation works, or null when it's ready.</summary>
     public string? SetupNeeded => string.IsNullOrWhiteSpace(Keys.Get()) && !(Settings.SpeechEngine == "elevenlabs" && !string.IsNullOrWhiteSpace(ElevenKeys.Get()))
-        ? "Add your xAI API key in Grok Voice's settings to start dictating."
+        ? "Add your xAI API key in Murmur's settings to start dictating."
         : null;
 
     /// <summary>Whether Right Alt dictates. Off lets Right Alt through untouched (for Wispr Flow, say).</summary>
@@ -326,7 +344,7 @@ internal sealed class DictationHost : IDisposable
     {
         var capture = GrokVoice.Context.AppAwareness.IsCapture(text);
         var message = capture
-            ? $"Quick capture from Grok Voice. File this as a reminder, task or list item as fits, then confirm in one short line:\n{text}"
+            ? $"Quick capture from Murmur. File this as a reminder, task or list item as fits, then confirm in one short line:\n{text}"
             : text;
         if (!Settings.ScreenContext || _context is not { IsCompletedSuccessfully: true } done) return message;
         var context = done.Result;
@@ -498,6 +516,7 @@ internal sealed class DictationHost : IDisposable
 
     private void OnStatus(DictationStatus status)
     {
+        _lastActive = _clock.Elapsed;
         switch (status)
         {
             case DictationStatus.Listening:
