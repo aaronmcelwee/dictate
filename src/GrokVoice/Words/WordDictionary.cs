@@ -84,7 +84,10 @@ internal sealed class WordDictionary
     public string Apply(string text)
     {
         if (_pattern is null || text.Length == 0) return text;
-        return _pattern.Replace(text, m => _lookup.TryGetValue(m.Value, out var r) ? r : m.Value);
+        return _pattern.Replace(text, m => !_lookup.TryGetValue(m.Value, out var r) ? m.Value
+            // An all-lowercase entry only fixes spelling; it never lowercases a name or a sentence start.
+            : r.Length == 0 || r.Any(char.IsUpper) || !m.Value.Any(char.IsUpper) ? r
+            : char.ToUpperInvariant(r[0]) + r[1..]);
     }
 
     private void Rebuild()

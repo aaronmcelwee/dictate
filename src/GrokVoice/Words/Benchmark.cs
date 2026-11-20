@@ -24,9 +24,10 @@ internal static partial class Benchmark
         var input = Path.Combine(Root, "in");
         var output = Path.Combine(Root, "out");
         if (!Directory.Exists(input) || File.Exists(Path.Combine(output, "summary.json"))) return;
-        if (apiKey() is not { Length: > 0 }) { Log.Write("bench no API key"); return; }
         // A run prepared for ElevenLabs waits until its key is saved.
         if (File.Exists(Path.Combine(input, "wait-for-elevenlabs")) && elevenKey() is not { Length: > 0 }) { Log.Write("bench waiting for the ElevenLabs key"); return; }
+        // Without an xAI key the Grok parts (and clean-up) are skipped; ElevenLabs alone still runs.
+        if (apiKey() is not { Length: > 0 } && elevenKey() is not { Length: > 0 }) { Log.Write("bench no API key"); return; }
         if (Interlocked.Exchange(ref _running, 1) == 1) return;
         _ = Task.Run(async () => { try { await RunAsync(input, output, apiKey, elevenKey, language, words, usage); } finally { _running = 0; } });
     }
@@ -143,14 +144,19 @@ internal static partial class Benchmark
             var pcm = Load16kMono(wav);
             var seconds = pcm.Length / 32000.0;
 
-            await using var stt = new XaiRestTranscriber(new XaiSttOptions { ApiKey = apiKey()!, Language = language })
+            var xai = apiKey() is { Length: > 0 };
+            var heard = "";
+            if (xai)
             {
-                Billed = (model, s) => usage.AddTranscription(model, s),
-            };
-            await stt.SendAudioAsync(pcm, CancellationToken.None).ConfigureAwait(false);
-            var heard = (await stt.FinishAsync(CancellationToken.None).ConfigureAwait(false)).Trim();
+                await using var stt = new XaiRestTranscriber(new XaiSttOptions { ApiKey = apiKey()!, Language = language })
+                {
+                    Billed = (model, s) => usage.AddTranscription(model, s),
+                };
+                await stt.SendAudioAsync(pcm, CancellationToken.None).ConfigureAwait(false);
+                heard = (await stt.FinishAsync(CancellationToken.None).ConfigureAwait(false)).Trim();
+            }
             var variants = new Dictionary<string, string>();
-            foreach (var (name, change, useKeyterms) in SttVariants)
+            foreach (var (name, change, useKeyterms) in SttVariants.Where(_ => xai))
             {
                 try
                 {
@@ -172,7 +178,7 @@ internal static partial class Benchmark
                 ToBot = () => false,
                 UseScreen = () => false,
             };
-            var cleaned = heard.Length == 0 ? "" : await polisher.PolishAsync(heard, CancellationToken.None).ConfigureAwait(false);
+            var cleaned = !xai || heard.Length == 0 ? "" : await polisher.PolishAsync(heard, CancellationToken.None).ConfigureAwait(false);
             if (elevenKey() is { Length: > 0 } eleven)
                 foreach (var (name, terms) in new[] { ("elevenlabs", (IReadOnlyList<string>?)null), ("elevenlabs_keyterms", words.Keyterms().Take(40).ToList()) })
                 {
@@ -183,7 +189,7 @@ internal static partial class Benchmark
                         await scribe.SendAudioAsync(pcm, CancellationToken.None).ConfigureAwait(false);
                         var text = (await scribe.FinishAsync(CancellationToken.None).ConfigureAwait(false)).Trim();
                         variants[name] = text;
-                        if (terms is null)
+                        if (terms is null && xai)
                             variants["elevenlabs_cleaned"] = text.Length == 0 ? "" : await polisher.PolishAsync(text, CancellationToken.None).ConfigureAwait(false);
                     }
                     catch (Exception e) { variants[name] = "ERROR: " + e.Message; }
