@@ -3,9 +3,11 @@ using Windows.Security.Credentials;
 namespace GrokVoice.Platform;
 
 /// <summary>An API key (xAI by default), kept in Windows Credential Manager for the signed-in user.</summary>
-internal sealed class ApiKeyStore(string userName = "xai-api-key")
+internal sealed class ApiKeyStore(string userName = "xai-api-key", string resource = "Grok Voice")
 {
-    private const string Resource = "Grok Voice";
+    // Each key gets its own resource: Credential Locker treats a resource as one slot in practice,
+    // and saving a second key under "Grok Voice" lost the xAI key.
+    private readonly string Resource = resource;
     private readonly string UserName = userName;
 
     private readonly PasswordVault _vault = new();
@@ -25,6 +27,20 @@ internal sealed class ApiKeyStore(string userName = "xai-api-key")
         {
             // Retrieve throws when nothing is stored.
             _cached = null;
+        }
+        // Keys saved before each key had its own resource sit under "Grok Voice": move them over.
+        if (_cached is null && Resource != "Grok Voice")
+        {
+            try
+            {
+                var old = _vault.Retrieve("Grok Voice", UserName);
+                old.RetrievePassword();
+                var key = old.Password;
+                _vault.Add(new PasswordCredential(Resource, UserName, key));
+                _vault.Remove(old);
+                _cached = key;
+            }
+            catch (Exception) { }
         }
         _loaded = true;
         return _cached;

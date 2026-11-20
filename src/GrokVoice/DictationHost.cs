@@ -130,7 +130,7 @@ internal sealed class DictationHost : IDisposable
     public void OnElevenKeySaved() => GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), () => ElevenKeys.Get(), Settings.Language, Words, Usage);
 
     /// <summary>ElevenLabs key, for Scribe speech-to-text when chosen in settings.</summary>
-    public ApiKeyStore ElevenKeys { get; } = new("elevenlabs-api-key");
+    public ApiKeyStore ElevenKeys { get; } = new("elevenlabs-api-key", "Grok Voice ElevenLabs");
     public ObservableCollection<string> Log { get; } = new();
     public DictationStatus Status => _controller.Status;
     public string? LastText { get; private set; }
@@ -149,7 +149,7 @@ internal sealed class DictationHost : IDisposable
         _controller.Status == DictationStatus.Listening && _altMachine.State == DictationState.HandsFree;
 
     /// <summary>What has to be set up before dictation works, or null when it's ready.</summary>
-    public string? SetupNeeded => string.IsNullOrWhiteSpace(Keys.Get())
+    public string? SetupNeeded => string.IsNullOrWhiteSpace(Keys.Get()) && !(Settings.SpeechEngine == "elevenlabs" && !string.IsNullOrWhiteSpace(ElevenKeys.Get()))
         ? "Add your xAI API key in Grok Voice's settings to start dictating."
         : null;
 
