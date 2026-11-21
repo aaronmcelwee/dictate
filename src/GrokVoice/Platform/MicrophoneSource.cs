@@ -1,3 +1,4 @@
+using Dictate.Core.Audio;
 using Dictate.Core.Dictation;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -21,10 +22,9 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
     // A capture made ready in advance (device found, audio client activated, raw stream requested) but
     // not started: no stream runs and Windows shows no microphone icon. Start then only has to start it.
     private (WasapiCapture Capture, MMDevice Device, bool Raw, string? DeviceId)? _ready;
-    // Frames since the stream opened at the device rate: the first moments are faded in, because
-    // opening the mic makes a loud click that would otherwise set the level for the whole clip.
-    private long _framesSinceOpen;
-    private int _openRate = 48000;
+    // Opening the mic makes a loud click that would otherwise set the level for the whole clip:
+    // the gate holds the start back until the click has died away or speech starts over it.
+    private OpenClickGate? _clickGate;
     private FloatQueue? _queue;
     private ISampleProvider? _resampler;
     private float[] _out = new float[4096];
@@ -116,7 +116,7 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
         lock (_gate)
         {
             if (_capture is not null) return;
-            _framesSinceOpen = 0;
+            _clickGate = null;
             // Fast path: the capture prepared in advance, if it is for the same device and still works.
             if (_ready is { } ready && ready.DeviceId == DeviceId)
             {
@@ -166,7 +166,6 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
     private void Opened(WasapiCapture capture, MMDevice device, bool raw, bool prepared)
     {
         var format = capture.WaveFormat;
-        _openRate = format.SampleRate;
         _queue = new FloatQueue(format.SampleRate);
         _resampler = format.SampleRate == _sampleRate ? _queue : new WdlResamplingSampleProvider(_queue, _sampleRate);
         Description = $"{device.FriendlyName}, {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample}-bit {format.Encoding}, {(raw ? "raw" : "processed")}";
@@ -302,11 +301,10 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
                     _ => (buffer[i] - 128) / 128f,
                 };
             }
-            // Silent for the first 80 ms, then faded in by 200 ms: removes the click of the mic opening.
-            var since = _framesSinceOpen++;
-            var ms = since * 1000.0 / _openRate;
-            var gain = ms < 80 ? 0f : ms < 200 ? (float)((ms - 80) / 120) : 1f;
-            queue.Add(sum / channels * gain);
+            var gate = _clickGate ??= new OpenClickGate(format.SampleRate);
+            var wasOpen = gate.IsOpen;
+            gate.Process(sum / channels, queue.Add);
+            if (!wasOpen && gate.IsOpen) GrokVoice.Log.Write($"mic   click gate opened after {gate.HeldMs} ms");
         }
 
         // Resample to the output rate and convert to 16-bit PCM.
