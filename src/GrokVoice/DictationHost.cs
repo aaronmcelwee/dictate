@@ -58,6 +58,7 @@ internal sealed class DictationHost : IDisposable
         _mic.DeviceId = Settings.MicrophoneId is { Length: > 0 } micId ? micId : null;
         _mic.Faulted += m => _ui.TryEnqueue(() => OnFailed(m));
         _mic.LevelChanged += OnLevel;
+        if (!Settings.KeepMicWarm) Task.Run(_mic.Prepare);
 
         // The mic now opens on key-down instead of staying open; switch existing installs over once.
         if (!Settings.MicClosedDefaulted)
@@ -204,6 +205,7 @@ internal sealed class DictationHost : IDisposable
             var wasRunning = _mic.IsRunning;
             _mic.Stop();
             if (wasRunning) _mic.Start();
+            else Task.Run(_mic.Prepare);
         }
     }
 

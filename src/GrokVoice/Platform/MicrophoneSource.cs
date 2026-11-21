@@ -18,6 +18,13 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
     private readonly object _gate = new();
     private readonly int _sampleRate;
     private WasapiCapture? _capture;
+    // A capture made ready in advance (device found, audio client activated, raw stream requested) but
+    // not started: no stream runs and Windows shows no microphone icon. Start then only has to start it.
+    private (WasapiCapture Capture, MMDevice Device, bool Raw, string? DeviceId)? _ready;
+    // Frames since the stream opened at the device rate: the first moments are faded in, because
+    // opening the mic makes a loud click that would otherwise set the level for the whole clip.
+    private long _framesSinceOpen;
+    private int _openRate = 48000;
     private FloatQueue? _queue;
     private ISampleProvider? _resampler;
     private float[] _out = new float[4096];
@@ -61,22 +68,78 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
         get { lock (_gate) return _capture is not null; }
     }
 
+    /// <summary>
+    /// Gets the next capture ready without opening the microphone, so the next Start is quick. Call it
+    /// off the UI thread, at startup and after each dictation.
+    /// </summary>
+    public void Prepare()
+    {
+        lock (_gate)
+        {
+            // Always a fresh one, so a change of default microphone since the last is picked up.
+            if (_capture is not null) return;
+            DropReadyLocked();
+            try
+            {
+                var device = FindDevice();
+                var capture = new WasapiCapture(device, useEventSync: true, audioBufferMillisecondsLength: 50);
+                var raw = Raw && TryRequestRaw(capture);
+                _ready = (capture, device, raw, DeviceId);
+            }
+            catch (Exception e)
+            {
+                GrokVoice.Log.Write($"mic   couldn't prepare ({e.Message}); it opens from scratch next time");
+            }
+        }
+    }
+
+    private void DropReadyLocked()
+    {
+        if (_ready is { } r) { try { r.Capture.Dispose(); } catch (Exception) { } }
+        _ready = null;
+    }
+
+    private MMDevice FindDevice()
+    {
+        using var devices = new MMDeviceEnumerator();
+        MMDevice? device = null;
+        if (DeviceId is { Length: > 0 } id)
+        {
+            try { device = devices.GetDevice(id); if (device.State != DeviceState.Active) device = null; }
+            catch (Exception) { device = null; }
+        }
+        return device ?? devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+    }
+
     public void Start()
     {
         lock (_gate)
         {
             if (_capture is not null) return;
+            _framesSinceOpen = 0;
+            // Fast path: the capture prepared in advance, if it is for the same device and still works.
+            if (_ready is { } ready && ready.DeviceId == DeviceId)
+            {
+                _ready = null;
+                try
+                {
+                    ready.Capture.DataAvailable += OnData;
+                    ready.Capture.StartRecording();
+                    Opened(ready.Capture, ready.Device, ready.Raw, prepared: true);
+                    return;
+                }
+                catch (Exception e)
+                {
+                    ready.Capture.DataAvailable -= OnData;
+                    try { ready.Capture.Dispose(); } catch (Exception) { }
+                    GrokVoice.Log.Write($"mic   prepared capture failed ({e.Message}); opening from scratch");
+                }
+            }
+            DropReadyLocked();
             WasapiCapture? capture = null;
             try
             {
-                using var devices = new MMDeviceEnumerator();
-                MMDevice? device = null;
-                if (DeviceId is { Length: > 0 } id)
-                {
-                    try { device = devices.GetDevice(id); if (device.State != DeviceState.Active) device = null; }
-                    catch (Exception) { device = null; }
-                }
-                device ??= devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+                var device = FindDevice();
                 capture = new WasapiCapture(device, useEventSync: true, audioBufferMillisecondsLength: 50);
                 var raw = Raw && TryRequestRaw(capture);
                 capture.DataAvailable += OnData;
@@ -90,13 +153,7 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
                     capture.DataAvailable += OnData;
                     capture.StartRecording();
                 }
-                var format = capture.WaveFormat;
-                _queue = new FloatQueue(format.SampleRate);
-                _resampler = format.SampleRate == _sampleRate ? _queue : new WdlResamplingSampleProvider(_queue, _sampleRate);
-                Description = $"{device.FriendlyName}, {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample}-bit {format.Encoding}, {(raw ? "raw" : "processed")}";
-                capture.RecordingStopped += OnStopped;
-                _capture = capture;
-                GrokVoice.Log.Write($"mic   {Description}");
+                Opened(capture, device, raw, prepared: false);
             }
             catch (Exception e)
             {
@@ -104,6 +161,18 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
                 Faulted?.Invoke(Describe(e));
             }
         }
+    }
+
+    private void Opened(WasapiCapture capture, MMDevice device, bool raw, bool prepared)
+    {
+        var format = capture.WaveFormat;
+        _openRate = format.SampleRate;
+        _queue = new FloatQueue(format.SampleRate);
+        _resampler = format.SampleRate == _sampleRate ? _queue : new WdlResamplingSampleProvider(_queue, _sampleRate);
+        Description = $"{device.FriendlyName}, {format.SampleRate} Hz, {format.Channels} ch, {format.BitsPerSample}-bit {format.Encoding}, {(raw ? "raw" : "processed")}";
+        capture.RecordingStopped += OnStopped;
+        _capture = capture;
+        GrokVoice.Log.Write($"mic   {Description}{(prepared ? ", prepared" : "")}");
     }
 
     /// <summary>
@@ -233,7 +302,11 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
                     _ => (buffer[i] - 128) / 128f,
                 };
             }
-            queue.Add(sum / channels);
+            // Silent for the first 80 ms, then faded in by 200 ms: removes the click of the mic opening.
+            var since = _framesSinceOpen++;
+            var ms = since * 1000.0 / _openRate;
+            var gain = ms < 80 ? 0f : ms < 200 ? (float)((ms - 80) / 120) : 1f;
+            queue.Add(sum / channels * gain);
         }
 
         // Resample to the output rate and convert to 16-bit PCM.
@@ -269,12 +342,18 @@ internal sealed class MicrophoneSource : IAudioSource, IDisposable
         capture.RecordingStopped -= OnStopped;
         capture.Dispose();
         if (e.Exception is not null && wasCurrent) Faulted?.Invoke(Describe(e.Exception));
+        // Ready the next one in the background.
+        Task.Run(Prepare);
     }
 
     private static string Describe(Exception e) =>
         $"Couldn't use the microphone ({e.Message}). Check Settings > Privacy & security > Microphone.";
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        Stop();
+        lock (_gate) DropReadyLocked();
+    }
 
     /// <summary>Mono float samples waiting to be resampled. Used only on the capture thread.</summary>
     private sealed class FloatQueue(int sampleRate) : ISampleProvider
