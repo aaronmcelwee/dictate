@@ -31,6 +31,9 @@ internal sealed class DictationHost : IDisposable
     private readonly KeyboardHook _hook;
     private readonly DictationController _controller;
     private readonly RecordingPill _pill = new();
+    private readonly TaskbarGlyph _glyph = new();
+    private readonly DispatcherQueueTimer _errorTimer;
+    private bool _error, _awaitingBot;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private TimeSpan _sessionStart;
     private int _levelPending;
@@ -45,7 +48,7 @@ internal sealed class DictationHost : IDisposable
         _ui = ui;
         GrokVoice.Log.Sink = Write;
         Bot = new BotSender(this);
-        var keyboard = new KeyboardTextSink { IsOwnWindow = h => h == _pill.Handle || h == MainWindowHandle };
+        var keyboard = new KeyboardTextSink { IsOwnWindow = h => h == _pill.Handle || h == _glyph.Handle || h == MainWindowHandle };
         Words = new GrokVoice.Words.WordDictionary();
         Polisher = new GrokVoice.Words.TextPolisher(() => Keys.Get(), Words, () => Settings.PolishEnabled, Usage);
         _sink = new RoutingTextSink(keyboard, Bot, Polisher.PolishAsync, WithScreenContext);
@@ -83,7 +86,12 @@ internal sealed class DictationHost : IDisposable
         _copilot.Gesture += e => _ui.TryEnqueue(() => OnCopilotGesture(e, "hook"));
 
         Bot.Replied += (name, reply) => _ui.TryEnqueue(() => OnBotReply(name, reply));
-        Bot.NoReply += name => Write($"bot   no reply from {name} within 5 minutes");
+        Bot.NoReply += name => _ui.TryEnqueue(() =>
+        {
+            Write($"bot   no reply from {name} within 5 minutes");
+            _awaitingBot = false;
+            UpdateGlyph();
+        });
         GrokVoice.Words.Benchmark.StartIfRequested(() => Keys.Get(), () => ElevenKeys.Get(), Settings.Language, Words, Usage);
         Updates = new Updater(this);
         Updates.Start();
@@ -91,7 +99,28 @@ internal sealed class DictationHost : IDisposable
         {
             if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
         };
-        _pill.Resting = Settings.RestingPill;
+
+        // The taskbar glyph: Murmur's resting UI. Cards (Jeeves, tips, errors) rise from just above it.
+        _errorTimer = _ui.CreateTimer();
+        _errorTimer.IsRepeating = false;
+        _errorTimer.Interval = TimeSpan.FromSeconds(8);
+        _errorTimer.Tick += (_, _) => { _error = false; UpdateGlyph(); };
+        _glyph.Enabled = Settings.RestingPill;
+        _pill.Resting = false;
+        _pill.Anchor = () => _glyph.IsShowing ? _glyph.Bounds : null;
+        _pill.Hidden += UpdateGlyph;
+        _pill.InsertRequested += InsertReply;
+        _glyph.Clicked += () =>
+        {
+            if (_pill.ShowingConversation) _pill.Hide();
+            else if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
+        };
+        _glyph.Hovering += on =>
+        {
+            if (on && _controller.Status == DictationStatus.Idle && !_awaitingBot) _pill.ShowTip($"${Usage.Today.Cost:0.00} today");
+            else _pill.HideTip();
+        };
+        _glyph.MenuRequested += ShowMenu;
 
         _hook = new KeyboardHook(Write) { RightAltEnabled = Settings.RightAltEnabled };
         _hook.RightAltDown += _alt.Down;
@@ -126,15 +155,102 @@ internal sealed class DictationHost : IDisposable
     /// <summary>What each xAI call cost, for the usage totals in settings.</summary>
     public GrokVoice.Usage.UsageLog Usage { get; } = new(Windows.Storage.ApplicationData.Current.LocalFolder.Path);
 
-    /// <summary>Whether the thin resting pill stays on screen while idle.</summary>
+    /// <summary>Whether Murmur's glyph shows in the taskbar (the setting kept its old name, "RestingPill").</summary>
     public bool RestingPill
     {
         get => Settings.RestingPill;
         set
         {
             Settings.RestingPill = value;
-            _pill.Resting = value;
+            _glyph.Enabled = value;
         }
+    }
+
+    /// <summary>Paused from the glyph's menu: Right Alt and the Copilot key hold do nothing until resumed.</summary>
+    public bool Paused { get; private set; }
+
+    /// <summary>The glyph's menu asked for settings.</summary>
+    public event Action? SettingsRequested;
+    /// <summary>The glyph's menu asked to quit.</summary>
+    public event Action? QuitRequested;
+
+    private void ShowMenu(int x, int y)
+    {
+        _pill.HideTip();
+        const int pause = 1, settings = 2, quit = 3;
+        var chosen = _glyph.ShowMenu(x, y,
+        [
+            (pause, Paused ? "Resume Murmur" : "Pause Murmur", false),
+            (settings, "Settings", false),
+            (0, "", false),
+            (quit, "Quit Murmur", false),
+        ]);
+        switch (chosen)
+        {
+            case pause:
+                Paused = !Paused;
+                _hook.RightAltEnabled = Settings.RightAltEnabled && !Paused;
+                Write(Paused ? "paused" : "resumed");
+                UpdateGlyph();
+                break;
+            case settings:
+                SettingsRequested?.Invoke();
+                break;
+            case quit:
+                QuitRequested?.Invoke();
+                break;
+        }
+    }
+
+    /// <summary>Insert under a Jeeves reply: types it where the cursor is (the card never takes focus).</summary>
+    private void InsertReply(string text)
+    {
+        if (_controller.Status != DictationStatus.Idle) return;
+        _sink.Keyboard.RememberTarget();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _sink.Keyboard.InsertAsync(text.Trim(), CancellationToken.None);
+                Write($"typed reply, {text.Length} chars");
+            }
+            catch (Exception e)
+            {
+                _ui.TryEnqueue(() => OnFailed(e.Message));
+            }
+        });
+    }
+
+    /// <summary>Sets the glyph from what Murmur is doing: violet for dictation, amber for the bot.</summary>
+    private void UpdateGlyph()
+    {
+        var bot = _owner == KeySource.Copilot;
+        var dictating = bot || _altMachine.State is DictationState.PushToTalk or DictationState.HandsFree;
+        _glyph.Mode = Paused ? Dictate.Core.Glyph.GlyphMode.Paused
+            : _error ? Dictate.Core.Glyph.GlyphMode.Error
+            : _controller.Status == DictationStatus.Listening && dictating
+                ? (bot ? Dictate.Core.Glyph.GlyphMode.BotListen : Dictate.Core.Glyph.GlyphMode.Listen)
+            : _controller.Status == DictationStatus.Transcribing
+                ? (bot ? Dictate.Core.Glyph.GlyphMode.BotWork : Dictate.Core.Glyph.GlyphMode.Work)
+            : _awaitingBot ? Dictate.Core.Glyph.GlyphMode.BotWork
+            : _pill.ShowingConversation ? Dictate.Core.Glyph.GlyphMode.Reply
+            : Dictate.Core.Glyph.GlyphMode.Rest;
+    }
+
+    /// <summary>
+    /// The listening card: only needed without the glyph, or to answer in an open Jeeves conversation.
+    /// Otherwise the glyph alone shows it.
+    /// </summary>
+    private void ShowListeningCard()
+    {
+        if (!_glyph.IsShowing || (ListeningMode == RecordingPill.ListenMode.Bot && _pill.ShowingConversation))
+            _pill.ShowListening(_sink.Keyboard.Target, ListeningMode);
+        else _pill.HideTip();
+    }
+
+    private void ShowAvatarCard()
+    {
+        if (!_glyph.IsShowing) _pill.ShowAvatar(BotAvatarClip);
     }
 
     public AppSettings Settings { get; } = new();
@@ -189,7 +305,7 @@ internal sealed class DictationHost : IDisposable
         set
         {
             Settings.RightAltEnabled = value;
-            _hook.RightAltEnabled = value;
+            _hook.RightAltEnabled = value && !Paused;
         }
     }
 
@@ -490,6 +606,11 @@ internal sealed class DictationHost : IDisposable
             Write($"do    {action} from {source} ignored, {owner} owns this dictation");
             return;
         }
+        if (Paused && action == DictationAction.StartCapture && _owner is null)
+        {
+            Write($"do    {action} from {source} ignored, Murmur is paused");
+            return;
+        }
         Write($"do    {action} ({source})");
         if (action == DictationAction.StartCapture)
         {
@@ -516,13 +637,14 @@ internal sealed class DictationHost : IDisposable
         {
             // A single tap also opens the mic, but the pill waits until it's clearly a dictation.
             case DictationState.PushToTalk or DictationState.HandsFree when _controller.Status == DictationStatus.Listening:
-                _pill.ShowListening(_sink.Keyboard.Target, ListeningMode);
+                ShowListeningCard();
                 Write($"pill  {state}");
                 break;
             case DictationState.Idle:
                 ReleaseOwnerIfDone();
                 break;
         }
+        UpdateGlyph();
         CancelAvailableChanged?.Invoke(CancelAvailable);
     }
 
@@ -539,9 +661,10 @@ internal sealed class DictationHost : IDisposable
                 if (_diagnostics is { } diag) _mic.BeginRaw(Path.Combine(diag, "device.wav"));
                 _sessionStart = _clock.Elapsed;
                 _sessionPeak = 0;
+                _error = false;
                 if (_owner == KeySource.Copilot || _altMachine.State is DictationState.PushToTalk or DictationState.HandsFree)
-                    _pill.ShowListening(_sink.Keyboard.Target, ListeningMode);
-                if (_owner == KeySource.Copilot) _pill.ShowAvatar(BotAvatarClip);
+                    ShowListeningCard();
+                if (_owner == KeySource.Copilot) ShowAvatarCard();
                 break;
             case DictationStatus.Transcribing:
                 _mic.EndRaw();
@@ -554,6 +677,7 @@ internal sealed class DictationHost : IDisposable
                 break;
         }
         Write($"state {status} at {(_clock.Elapsed - _sessionStart).TotalMilliseconds:0} ms");
+        UpdateGlyph();
         StatusChanged?.Invoke(status);
         CancelAvailableChanged?.Invoke(CancelAvailable);
     }
@@ -565,7 +689,9 @@ internal sealed class DictationHost : IDisposable
         if (_sink.Current == DictationTarget.Bot)
         {
             _pill.ShowSent(Bot.BotName ?? "your bot", LastText, _sink.Keyboard.Target);
-            _pill.ShowAvatar(BotAvatarClip);
+            ShowAvatarCard();
+            _awaitingBot = true;
+            UpdateGlyph();
         }
         Write($"{(_sink.Current == DictationTarget.Bot ? "sent" : "typed")} {text.Length} chars, {(_clock.Elapsed - _sessionStart).TotalMilliseconds:0} ms after start");
         Inserted?.Invoke(text);
@@ -574,10 +700,16 @@ internal sealed class DictationHost : IDisposable
     private void OnBotReply(string botName, string reply)
     {
         Write($"bot   {botName} replied ({reply.Length} chars)");
+        _awaitingBot = false;
         // Never cover a dictation in progress; the reply is in Grok Bot either way.
-        if (_controller.Status != DictationStatus.Idle) return;
+        if (_controller.Status != DictationStatus.Idle)
+        {
+            UpdateGlyph();
+            return;
+        }
         _pill.ShowReply(botName, reply, _sink.Keyboard.Target);
-        _pill.ShowAvatar(BotAvatarClip);
+        ShowAvatarCard();
+        UpdateGlyph();
     }
 
     private string? BotAvatarClip => Settings.AvatarClip(Settings.BotId) is { Length: > 0 } path ? path : null;
@@ -587,6 +719,11 @@ internal sealed class DictationHost : IDisposable
         Write($"error {message}");
         _pill.ShowError(message, _sink.Keyboard.Target);
         ReleaseOwnerIfDone();
+        _awaitingBot = false;
+        _error = true;
+        _errorTimer.Stop();
+        _errorTimer.Start();
+        UpdateGlyph();
         Failed?.Invoke(message);
     }
 
@@ -599,6 +736,7 @@ internal sealed class DictationHost : IDisposable
         {
             Volatile.Write(ref _levelPending, 0);
             _pill.SetLevel(peak);
+            _glyph.SetLevel(peak);
         });
     }
 
@@ -611,5 +749,6 @@ internal sealed class DictationHost : IDisposable
         _controller.Dispose();
         _mic.Dispose();
         _pill.Hide();
+        _glyph.Dispose();
     }
 }

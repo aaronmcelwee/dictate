@@ -54,6 +54,8 @@ public sealed partial class MainWindow : Window
         };
 
         _host.StatusChanged += OnStatus;
+        _host.SettingsRequested += Present;
+        _host.QuitRequested += () => Quit_Click(this, new RoutedEventArgs());
         // Escape belongs to Grok Voice only during hands-free dictation.
         _host.CancelAvailableChanged += available => _escape.Enabled = available;
         _host.Inserted += text => LastText.Text = _host.Polisher.LastRaw is { Length: > 0 } raw && raw != text

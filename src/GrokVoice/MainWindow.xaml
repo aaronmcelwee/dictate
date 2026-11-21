@@ -156,8 +156,8 @@
                     </tk:SettingsCard.ActionIcon>
                 </tk:SettingsCard>
 
-                <tk:SettingsCard Header="Resting pill"
-                                 Description="Keeps a thin capsule at the bottom of the screen while idle. It grows into the pill when you dictate, and a click opens Grok Bot.">
+                <tk:SettingsCard Header="Show in taskbar"
+                                 Description="Murmur's glyph sits left of Start: violet while you dictate, amber while you talk to Jeeves. Click it to open Grok Bot, right-click for more.">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE7C4;" />
                     </tk:SettingsCard.HeaderIcon>

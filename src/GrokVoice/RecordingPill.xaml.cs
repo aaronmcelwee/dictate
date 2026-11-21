@@ -30,10 +30,17 @@ public sealed partial class RecordingPill : Window
     private const double MaxReplyHeightDip = 420;
     private const double BottomMarginDip = 28;
     private const double MaxWidthDip = 400;
-    private const double ReplyWidthDip = 460;
+    private const double ReplyWidthDip = 360;
+    /// <summary>Card corners above the glyph (Windows 11 flyout radius) and the gap above the taskbar.</summary>
+    private const double CardRadiusDip = 8;
+    private const double AboveTaskbarDip = 12;
     private const int BarCount = 11;
     private static readonly Windows.Foundation.Size RestSize = new(40, 6);
-    private static readonly Windows.UI.Color PillColor = Windows.UI.Color.FromArgb(255, 18, 18, 18);
+    private static readonly Windows.UI.Color CapsuleColor = Windows.UI.Color.FromArgb(255, 18, 18, 18);
+    /// <summary>Dark flyout surface, as Windows 11's taskbar flyouts without their acrylic.</summary>
+    private static readonly Windows.UI.Color CardColor = Windows.UI.Color.FromArgb(255, 43, 43, 43);
+    private static readonly Windows.UI.Color Amber = Windows.UI.Color.FromArgb(255, 255, 184, 107);
+    private Windows.UI.Color PillColor => Anchored ? CardColor : CapsuleColor;
     private static readonly Windows.UI.Color RestColor = Windows.UI.Color.FromArgb(255, 64, 64, 64);
     private static readonly TimeSpan ResizeTime = TimeSpan.FromMilliseconds(240);
     private static readonly TimeSpan FadeTime = TimeSpan.FromMilliseconds(160);
@@ -122,7 +129,9 @@ public sealed partial class RecordingPill : Window
         // Closing would destroy the window; it is only ever parked.
         AppWindow.Closing += (_, e) => e.Cancel = true;
 
-        Root.Tapped += (_, _) => Clicked?.Invoke();
+        OpenButton.Click += (_, _) => Clicked?.Invoke();
+        // Without the glyph, the capsule itself is the way into Grok Bot.
+        Root.Tapped += (_, _) => { if (!Anchored) Clicked?.Invoke(); };
         // Reading a reply: keep it up while the pointer is over it, then give a few more seconds.
         Root.PointerEntered += (_, _) => { if (_look == Look.Message) _hideTimer.Stop(); };
         Root.PointerExited += (_, _) =>
@@ -137,6 +146,24 @@ public sealed partial class RecordingPill : Window
     }
 
     public IntPtr Handle => _hwnd;
+
+    /// <summary>
+    /// The taskbar glyph's screen rectangle (physical pixels), or null when it isn't showing. With a glyph,
+    /// cards rise from just above it on the left instead of the bottom centre.
+    /// </summary>
+    public Func<(int Left, int Top, int Right, int Bottom)?>? Anchor { get; set; }
+
+    private (int Left, int Top, int Right, int Bottom)? GlyphRect => Anchor?.Invoke();
+    private bool Anchored => GlyphRect is not null;
+
+    /// <summary>The card left the screen.</summary>
+    public event Action? Hidden;
+
+    /// <summary>Insert was clicked under a reply: type this text where the cursor is.</summary>
+    public event Action<string>? InsertRequested;
+
+    /// <summary>A bot conversation (or its listening row) is on screen.</summary>
+    public bool ShowingConversation => InConversation;
 
     private string? _avatarPath;
 
@@ -221,6 +248,7 @@ public sealed partial class RecordingPill : Window
     public void ShowError(string message, IntPtr nearWindow)
     {
         _conversation = false;
+        _tip = false;
         ShowMessage("Murmur", message, "\uE783", nearWindow, TimeSpan.FromSeconds(6));
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 153, 164));
     }
@@ -232,6 +260,7 @@ public sealed partial class RecordingPill : Window
     /// <summary>The bot's reply, shown for a while longer the longer it is. Clicking the pill raises <see cref="Clicked"/>.</summary>
     public void ShowReply(string botName, string reply, IntPtr nearWindow)
     {
+        _tip = false;
         // "Jeeves · Chief of Staff" reads as "Jeeves" in the pill.
         var name = botName.Split(" · ", 2)[0].Trim();
         if (!InConversation)
@@ -242,9 +271,12 @@ public sealed partial class RecordingPill : Window
         RemoveTransient();
         // Earlier answers step back so the newest turn stands out.
         foreach (var turn in Turns.Children.OfType<RichTextBlock>()) turn.Opacity = 0.55;
+        foreach (var old in Turns.Children.OfType<StackPanel>().Where(row => row.Tag is "actions").ToList())
+            Turns.Children.Remove(old);
         Turns.Children.Add(BotTurn(reply, markdown: true));
+        Turns.Children.Add(Actions(MarkdownInlines.ToPlain(reply)));
         _look = Look.Message;
-        ShowCardHeader(name, "\uE99A");
+        ShowCardHeader(name, "\uE99A", bot: true);
         FitCard(nearWindow);
         var plain = MarkdownInlines.ToPlain(reply);
         _hideTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(5 + plain.Length / 15.0, 6, 45));
@@ -260,15 +292,22 @@ public sealed partial class RecordingPill : Window
         var name = botName.Split(" · ", 2)[0].Trim();
         if (!InConversation)
         {
-            ShowInfo($"Sent to {name}", nearWindow);
-            return;
+            if (!Anchored)
+            {
+                ShowInfo($"Sent to {name}", nearWindow);
+                return;
+            }
+            // With the glyph, every question opens the conversation card: your words, then Jeeves working.
+            Turns.Children.Clear();
+            _conversation = true;
+            ShowCardHeader(name, "\uE99A", bot: true);
         }
         RemoveTransient();
         Turns.Children.Add(MyTurn(text));
         _pending = new TextBlock
         {
             Text = "•••", FontSize = 13, CharacterSpacing = 200,
-            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 125, 125, 132)),
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Anchored ? Amber : Windows.UI.Color.FromArgb(255, 125, 125, 132)),
         };
         Turns.Children.Add(_pending);
         _look = Look.Message;
@@ -308,7 +347,7 @@ public sealed partial class RecordingPill : Window
     {
         HorizontalAlignment = HorizontalAlignment.Right,
         MaxWidth = (ReplyWidthDip - 14 - 14 - 8) * 0.8,
-        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 42, 42, 46)),
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 60, 60, 60)),
         CornerRadius = new CornerRadius(12, 12, 4, 12),
         Padding = new Thickness(10, 6, 10, 7),
         Child = new TextBlock
@@ -327,11 +366,12 @@ public sealed partial class RecordingPill : Window
             _miniBars[i] = new Microsoft.UI.Xaml.Shapes.Rectangle
             {
                 Width = 3, Height = 3, RadiusX = 1.5, RadiusY = 1.5, VerticalAlignment = VerticalAlignment.Center,
-                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Anchored ? Amber : Microsoft.UI.Colors.White),
             };
             bars.Children.Add(_miniBars[i]);
         }
         row.Children.Add(bars);
+        if (Anchored) return row;
         row.Children.Add(new TextBlock
         {
             Text = "Listening…", FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
@@ -340,9 +380,20 @@ public sealed partial class RecordingPill : Window
         return row;
     }
 
-    private void ShowCardHeader(string title, string glyph)
+    private void ShowCardHeader(string title, string glyph, bool bot = false)
     {
-        if (AvatarFrame.Visibility != Visibility.Visible)
+        Monogram.Visibility = Visibility.Collapsed;
+        OpenButton.Visibility = bot ? Visibility.Visible : Visibility.Collapsed;
+        if (bot && Anchored)
+        {
+            // The bot's initial on amber, matching the glyph; no character clip.
+            AvatarFrame.Visibility = Visibility.Collapsed;
+            Avatar.MediaPlayer?.Pause();
+            BadgeGlyph.Visibility = Visibility.Collapsed;
+            MonogramText.Text = title.Length > 0 ? title[..1].ToUpperInvariant() : "?";
+            Monogram.Visibility = Visibility.Visible;
+        }
+        else if (AvatarFrame.Visibility != Visibility.Visible)
         {
             BadgeGlyph.Glyph = glyph;
             BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
@@ -352,8 +403,51 @@ public sealed partial class RecordingPill : Window
         Wave.Visibility = Visibility.Collapsed;
         Message.Visibility = Visibility.Visible;
         TitleText.Text = title;
+        TitleText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         BodyScroll.Visibility = Visibility.Visible;
     }
+
+    /// <summary>Insert and Copy under the newest reply.</summary>
+    private StackPanel Actions(string text)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Tag = "actions" };
+        Button Make(string label, string glyph, Action click)
+        {
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            content.Children.Add(new FontIcon { Glyph = glyph, FontSize = 12 });
+            content.Children.Add(new TextBlock { Text = label, FontSize = 12 });
+            var button = new Button { Content = content, Padding = new Thickness(10, 4, 10, 5), MinHeight = 28 };
+            button.Click += (_, _) => click();
+            return button;
+        }
+        row.Children.Add(Make("Insert", "\uE8D2", () => InsertRequested?.Invoke(text)));
+        row.Children.Add(Make("Copy", "\uE8C8", () =>
+        {
+            var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            data.SetText(text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+        }));
+        return row;
+    }
+
+    /// <summary>A small note above the glyph, such as today's cost, while the pointer rests on it.</summary>
+    public void ShowTip(string text)
+    {
+        if (InConversation || (_onScreen && !_hiding && _look is Look.Listening or Look.Transcribing)) return;
+        // Don't cover an error or note that is still up.
+        if (_onScreen && !_hiding && _look == Look.Message && !_tip) return;
+        _tip = true;
+        ShowMessage(text, null, null, IntPtr.Zero, TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>Takes the tip down, leaving anything else on screen.</summary>
+    public void HideTip()
+    {
+        if (_tip && _look == Look.Message && !_conversation) Hide();
+        _tip = false;
+    }
+
+    private bool _tip;
 
     /// <summary>Sizes the card to its conversation (scrolling past the maximum) and keeps the newest turn in view.</summary>
     private void FitCard(IntPtr nearWindow)
@@ -453,20 +547,23 @@ public sealed partial class RecordingPill : Window
         if (!_hideTimer.IsRunning) Hide();
     }
 
-    private void ShowMessage(string title, string? body, string glyph, IntPtr nearWindow, TimeSpan showFor)
+    private void ShowMessage(string title, string? body, string? glyph, IntPtr nearWindow, TimeSpan showFor)
     {
         _conversation = false;
         RemoveTransient();
         _look = Look.Message;
         AvatarFrame.Visibility = Visibility.Collapsed;
         Avatar.MediaPlayer?.Pause();
-        BadgeGlyph.Glyph = glyph;
+        Monogram.Visibility = Visibility.Collapsed;
+        OpenButton.Visibility = Visibility.Collapsed;
+        BadgeGlyph.Glyph = glyph ?? "";
         BadgeGlyph.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
-        BadgeGlyph.Visibility = Visibility.Visible;
-        Badge.Visibility = Visibility.Visible;
+        BadgeGlyph.Visibility = glyph is null ? Visibility.Collapsed : Visibility.Visible;
+        Badge.Visibility = glyph is null ? Visibility.Collapsed : Visibility.Visible;
         Wave.Visibility = Visibility.Collapsed;
         Message.Visibility = Visibility.Visible;
         TitleText.Text = title;
+        TitleText.FontWeight = glyph is null ? Microsoft.UI.Text.FontWeights.Normal : Microsoft.UI.Text.FontWeights.SemiBold;
 
         if (body is { Length: > 0 })
         {
@@ -481,7 +578,7 @@ public sealed partial class RecordingPill : Window
         BodyScroll.Visibility = Visibility.Collapsed;
         _measure.Text = title;
         _measure.Measure(new(double.PositiveInfinity, double.PositiveInfinity));
-        Present(nearWindow, PillSize(badge: true, Math.Ceiling(_measure.DesiredSize.Width) + 1));
+        Present(nearWindow, PillSize(badge: glyph is not null, Math.Ceiling(_measure.DesiredSize.Width) + 1));
         _hideTimer.Interval = showFor;
         _hideTimer.Start();
     }
@@ -565,6 +662,8 @@ public sealed partial class RecordingPill : Window
 
     private void Locate(IntPtr nearWindow)
     {
+        // Cards over the glyph live on the taskbar's (primary) screen.
+        if (GlyphRect is not null) nearWindow = IntPtr.Zero;
         var anchor = nearWindow != IntPtr.Zero ? nearWindow : GetDesktopWindow();
         var monitor = MonitorFromWindow(anchor, MONITOR_DEFAULTTOPRIMARY);
         _scale = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpi, out _) == 0 ? dpi / 96.0 : 1.0;
@@ -652,7 +751,8 @@ public sealed partial class RecordingPill : Window
     }
 
     /// <summary>How far above the work area's bottom the pill sits; small sizes stay centred on the full-height line.</summary>
-    private static double BottomFor(Windows.Foundation.Size size) => BottomMarginDip + (HeightDip - Math.Min(size.Height, HeightDip)) / 2;
+    private double BottomFor(Windows.Foundation.Size size) =>
+        (Anchored ? AboveTaskbarDip : BottomMarginDip) + (HeightDip - Math.Min(size.Height, HeightDip)) / 2;
 
     /// <summary>Moves and sizes the window itself to hold a <paramref name="box"/>-sized pill.</summary>
     private void Place(Windows.Foundation.Size box, bool topmost)
@@ -668,8 +768,10 @@ public sealed partial class RecordingPill : Window
         // Measure it only when the window is at rest: mid-animation the child window lags behind.
         if (topmost || _insets is null || _insets == (0, 0, 0, 0)) _insets = FrameInsets();
         var (left, top, right, bottomInset) = _insets.Value;
+        // Over the glyph: left edges line up; otherwise centred on the screen.
+        var x = GlyphRect is { } a ? Math.Clamp(a.Left, _work.X, _work.X + _work.Width - width) : _work.X + (_work.Width - width) / 2;
         SetWindowPos(_hwnd, topmost ? HWND_TOPMOST : IntPtr.Zero,
-            _work.X + (_work.Width - width) / 2 - left,
+            x - left,
             _work.Y + _work.Height - height - (int)Math.Round(BottomFor(box) * _scale) - top,
             width + left + right, height + top + bottomInset, SWP_NOACTIVATE | SWP_SHOWWINDOW | (topmost ? 0 : SWP_NOZORDER));
     }
@@ -688,10 +790,11 @@ public sealed partial class RecordingPill : Window
         Root.Width = width / _scale;
         Root.Height = height / _scale;
         Root.Margin = new Thickness(0, 0, 0, lift / _scale);
-        var x = left + (boxW - width) / 2;
+        Root.HorizontalAlignment = Anchored ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+        var x = Anchored ? left : left + (boxW - width) / 2;
         var y = top + boxH - height - (int)Math.Round(lift);
         // Cards round at the capsule's own radius, so the header badge sits concentric in the corner.
-        var radius = Math.Min(size.Height / 2, HeightDip / 2);
+        var radius = Anchored ? Math.Min(size.Height / 2, CardRadiusDip) : Math.Min(size.Height / 2, HeightDip / 2);
         var d = (int)Math.Round(radius * 2 * _scale);
         SetWindowRgn(_hwnd, CreateRoundRectRgn(x, y, x + width + 1, y + height + 1, d, d), true);
     }
@@ -751,7 +854,10 @@ public sealed partial class RecordingPill : Window
     private void Park()
     {
         SetWindowPos(_hwnd, IntPtr.Zero, -32000, -32000, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+        var was = _onScreen;
         _onScreen = false;
+        _tip = false;
+        if (was) Hidden?.Invoke();
     }
 
     private const int GWL_EXSTYLE = -20;
