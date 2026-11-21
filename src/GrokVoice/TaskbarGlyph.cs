@@ -246,7 +246,8 @@ internal sealed class TaskbarGlyph : IDisposable
         var memory = CreateCompatibleDC(screen);
         var header = new BITMAPINFO
         {
-            biSize = 40, // BITMAPINFOHEADER only biWidth = size, biHeight = -size, biPlanes = 1, biBitCount = 32,
+            // biSize is the header alone (40 bytes), not the header plus the colour table.
+            biSize = 40, biWidth = size, biHeight = -size, biPlanes = 1, biBitCount = 32,
         };
         var bitmap = CreateDIBSection(screen, ref header, 0, out var bits, IntPtr.Zero, 0);
         if (bitmap == IntPtr.Zero || bits == IntPtr.Zero)
