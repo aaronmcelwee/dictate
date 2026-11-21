@@ -119,4 +119,6 @@ jobs:
             gh release create murmur-latest --repo "$repo" --prerelease --title "Murmur (latest build)" \
               --notes "Latest Murmur build. The installed app updates itself from here." --target "${{ github.sha }}"
           fi
-          gh release upload murmur-latest --repo "$repo" --clobber release/*
+          # Packages first, latest.json last, so an updater never sees a new version pointing at an old package.
+          gh release upload murmur-latest --repo "$repo" --clobber release/Murmur_arm64.msix release/Murmur_x64.msix release/Murmur.cer
+          gh release upload murmur-latest --repo "$repo" --clobber release/latest.json
