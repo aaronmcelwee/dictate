@@ -49,11 +49,23 @@ internal sealed class TaskbarGlyph : IDisposable
         try { SetPreferredAppMode(1); FlushMenuThemes(); } catch { }
 
         // The taskbar or another topmost window coming forward can cover the glyph: put it back.
-        _winEvent = (_, _, _, _, _, _, _) => Place();
+        _winEvent = (_, _, _, _, _, _, _) =>
+        {
+            try { Place(); }
+            catch (Exception e) { Error?.Invoke($"glyph place: {e}"); }
+        };
         _eventHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, _winEvent, 0, 0, WINEVENT_OUTOFCONTEXT);
         SetTimer(_hwnd, (IntPtr)PlaceTimer, 500, IntPtr.Zero);
-        Place();
-        Draw();
+        try
+        {
+            Place();
+            Draw();
+            Error?.Invoke($"glyph window {_hwnd:X} at {_bounds.Left},{_bounds.Top} size {_bounds.Right - _bounds.Left}, showing {_visible}");
+        }
+        catch (Exception e)
+        {
+            Error?.Invoke($"glyph start: {e}");
+        }
     }
 
     public IntPtr Handle => _hwnd;
@@ -237,6 +249,14 @@ internal sealed class TaskbarGlyph : IDisposable
             biSize = 40, // BITMAPINFOHEADER only biWidth = size, biHeight = -size, biPlanes = 1, biBitCount = 32,
         };
         var bitmap = CreateDIBSection(screen, ref header, 0, out var bits, IntPtr.Zero, 0);
+        if (bitmap == IntPtr.Zero || bits == IntPtr.Zero)
+        {
+            Error?.Invoke($"glyph bitmap {size} px failed (error {Marshal.GetLastWin32Error()})");
+            if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
+            DeleteDC(memory);
+            ReleaseDC(IntPtr.Zero, screen);
+            return;
+        }
         var old = SelectObject(memory, bitmap);
         if (_pixels.Length != size * size * 4) _pixels = new byte[size * size * 4];
         _model.Render(_pixels, size, _scale);
@@ -252,7 +272,23 @@ internal sealed class TaskbarGlyph : IDisposable
         ReleaseDC(IntPtr.Zero, screen);
     }
 
+    /// <summary>Raised when something in the glyph fails; it keeps going, so Murmur does too.</summary>
+    public static Action<string>? Error { get; set; }
+
     private IntPtr Proc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            return Handle(hwnd, msg, wParam, lParam);
+        }
+        catch (Exception e)
+        {
+            Error?.Invoke($"glyph {msg:X}: {e}");
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+    }
+
+    private IntPtr Handle(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         switch (msg)
         {

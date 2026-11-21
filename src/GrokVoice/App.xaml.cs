@@ -15,6 +15,19 @@ public partial class App : Application
         InitializeComponent();
         // Grok Voice lives in the background with no visible window; only Quit ends it.
         DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
+        // A bug in one piece (say, the taskbar glyph) must not take dictation down with it: write it to
+        // LocalState\crash.log and carry on.
+        UnhandledException += (_, e) =>
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "crash.log"),
+                    $"{DateTimeOffset.Now:O} {e.Exception}\n\n");
+                _host?.Write($"error (kept running) {e.Exception.GetType().Name}: {e.Exception.Message}");
+            }
+            catch { }
+            e.Handled = true;
+        };
     }
 
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)

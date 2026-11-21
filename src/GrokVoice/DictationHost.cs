@@ -31,7 +31,7 @@ internal sealed class DictationHost : IDisposable
     private readonly KeyboardHook _hook;
     private readonly DictationController _controller;
     private readonly RecordingPill _pill = new();
-    private readonly TaskbarGlyph _glyph = new();
+    private readonly TaskbarGlyph _glyph;
     private readonly DispatcherQueueTimer _errorTimer;
     private bool _error, _awaitingBot;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -47,6 +47,8 @@ internal sealed class DictationHost : IDisposable
     {
         _ui = ui;
         GrokVoice.Log.Sink = Write;
+        TaskbarGlyph.Error = Write;
+        _glyph = new TaskbarGlyph();
         Bot = new BotSender(this);
         var keyboard = new KeyboardTextSink { IsOwnWindow = h => h == _pill.Handle || h == _glyph.Handle || h == MainWindowHandle };
         Words = new GrokVoice.Words.WordDictionary();
