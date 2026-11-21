@@ -27,6 +27,8 @@ public sealed class HoldDetector : IDisposable
 
     /// <summary>Raised for Tap, HoldStart and HoldEnd, on the thread that caused it (the timer's for HoldStart).</summary>
     public event Action<KeyEvent>? Gesture;
+    /// <summary>The key went down (before anyone knows if it's a tap or a hold), on the caller's thread.</summary>
+    public event Action? Pressed;
 
     public bool IsDown
     {
@@ -45,6 +47,7 @@ public sealed class HoldDetector : IDisposable
             _timer?.Dispose();
             _timer = _time.CreateTimer(_ => OnThreshold(press), null, _threshold, Timeout.InfiniteTimeSpan);
         }
+        Pressed?.Invoke();
     }
 
     /// <summary>The key came up.</summary>

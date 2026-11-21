@@ -59,7 +59,17 @@ internal sealed class DictationHost : IDisposable
         _mic.Faulted += m => _ui.TryEnqueue(() => OnFailed(m));
         _mic.LevelChanged += OnLevel;
 
+        // The mic now opens on key-down instead of staying open; switch existing installs over once.
+        if (!Settings.MicClosedDefaulted)
+        {
+            Settings.KeepMicWarm = false;
+            Settings.MicClosedDefaulted = true;
+        }
         _controller = new DictationController(_mic, _sink, CreateTranscriber, Settings.KeepMicWarm);
+        // A dictation key went down: open the mic now so the first words of a hold are kept. Off the
+        // keyboard hook's thread, which must return at once.
+        _alt.Pressed += () => Task.Run(() => _controller.Prime(TimeSpan.FromSeconds(1.5)));
+        _copilot.Pressed += () => Task.Run(() => _controller.Prime(TimeSpan.FromSeconds(1.5)));
         _controller.StatusChanged += s => _ui.TryEnqueue(() => OnStatus(s));
         _controller.TextChanged += t => _ui.TryEnqueue(() => _pill.SetTranscript(t));
         _controller.Inserted += t => _ui.TryEnqueue(() => OnInserted(t));

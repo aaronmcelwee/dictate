@@ -130,8 +130,8 @@
                 <!-- Microphone -->
                 <TextBlock Text="Microphone" Margin="1,24,0,6" Style="{StaticResource BodyStrongTextBlockStyle}" />
 
-                <tk:SettingsCard Header="Catch the first words"
-                                 Description="Keeps the microphone open in the background so nothing is lost while it waits to see that you're holding the key. Audio stays in memory and is thrown away unless you dictate. The microphone-in-use icon stays on.">
+                <tk:SettingsCard Header="Keep the microphone open"
+                                 Description="Off: the microphone opens the moment you press Right Alt or the Copilot key and closes when you're done, so the microphone icon is only on while you dictate. On: it stays open in the background (audio kept in memory, thrown away unless you dictate) for the fastest start.">
                     <tk:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE1D6;" />
                     </tk:SettingsCard.HeaderIcon>

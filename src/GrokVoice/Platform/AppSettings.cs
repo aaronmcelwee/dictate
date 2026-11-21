@@ -10,8 +10,15 @@ internal sealed class AppSettings
 
     public bool KeepMicWarm
     {
-        get => Get(nameof(KeepMicWarm), true);
+        get => Get(nameof(KeepMicWarm), false);
         set => _values[nameof(KeepMicWarm)] = value;
+    }
+
+    /// <summary>Keep-mic-open was switched off once when opening on key-down arrived; after that it's the user's choice.</summary>
+    public bool MicClosedDefaulted
+    {
+        get => Get(nameof(MicClosedDefaulted), false);
+        set => _values[nameof(MicClosedDefaulted)] = value;
     }
 
     /// <summary>Whether Right Alt dictates at the cursor.</summary>

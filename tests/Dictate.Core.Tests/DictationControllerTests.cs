@@ -151,6 +151,40 @@ public class DictationControllerTests
     }
 
     [Fact]
+    public async Task Priming_on_key_down_keeps_the_first_words_with_the_mic_closed_when_idle()
+    {
+        var audio = new FakeAudio();
+        var sink = new FakeSink();
+        var t = new FakeTranscriber("hi");
+        using var c = new DictationController(audio, sink, () => t, keepMicWarm: false);
+        Assert.False(audio.Running);
+
+        c.Prime(TimeSpan.FromSeconds(5));      // key down
+        Assert.True(audio.Running);
+        audio.Speak(1, 2);                     // before the hold registers
+        c.Handle(DictationAction.StartCapture);
+        audio.Speak(3, 4);
+        c.Handle(DictationAction.StopAndTranscribe);
+        await sink.Text.Task.WaitAsync(Wait);
+
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, t.Received);
+        Assert.False(audio.Running);           // closed again after the dictation
+        Assert.Equal(1, audio.Starts);
+    }
+
+    [Fact]
+    public async Task A_primed_mic_closes_again_when_no_dictation_starts()
+    {
+        var audio = new FakeAudio();
+        using var c = new DictationController(audio, new FakeSink(), () => null, keepMicWarm: false);
+        c.Prime(TimeSpan.FromMilliseconds(50));  // a tap or a shortcut
+        Assert.True(audio.Running);
+        var deadline = DateTime.UtcNow + Wait;
+        while (audio.Running && DateTime.UtcNow < deadline) await Task.Delay(10);
+        Assert.False(audio.Running);
+    }
+
+    [Fact]
     public void Turning_keep_warm_off_stops_the_mic_when_idle()
     {
         var audio = new FakeAudio();
