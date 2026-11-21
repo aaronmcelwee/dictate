@@ -279,7 +279,7 @@ internal sealed class TaskbarGlyph : IDisposable
     {
         try
         {
-            return Handle(hwnd, msg, wParam, lParam);
+            return HandleMessage(hwnd, msg, wParam, lParam);
         }
         catch (Exception e)
         {
@@ -288,7 +288,7 @@ internal sealed class TaskbarGlyph : IDisposable
         }
     }
 
-    private IntPtr Handle(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    private IntPtr HandleMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         switch (msg)
         {
