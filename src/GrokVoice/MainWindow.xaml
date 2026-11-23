@@ -298,27 +298,28 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid ColumnSpacing="8" Margin="0,0,0,8">
+                    <TextBlock Text="Dictionary" Style="{StaticResource TitleTextBlockStyle}" TextWrapping="NoWrap" Margin="0,0,0,8" />
+
+                    <Grid Grid.Row="1" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="Dictionary" Style="{StaticResource TitleTextBlockStyle}" />
-                        <AutoSuggestBox x:Name="DictionarySearch" Grid.Column="1" Width="220" PlaceholderText="Search"
+                        <AutoSuggestBox x:Name="DictionarySearch" PlaceholderText="Search" MaxWidth="360" HorizontalAlignment="Stretch"
                                         AutomationProperties.Name="Search the dictionary"
                                         QueryIcon="Find" VerticalAlignment="Center" TextChanged="DictionarySearch_TextChanged" />
-                        <Button Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="AddEntry_Click" VerticalAlignment="Center"
+                        <Button Grid.Column="1" Style="{StaticResource AccentButtonStyle}" Click="AddEntry_Click" VerticalAlignment="Center"
                                 AutomationProperties.Name="Add">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE710;" FontSize="14" />
                                 <TextBlock Text="Add" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="3" VerticalAlignment="Center" ToolTipService.ToolTip="More" AutomationProperties.Name="More">
+                        <Button Grid.Column="2" VerticalAlignment="Center" ToolTipService.ToolTip="More" AutomationProperties.Name="More">
                             <FontIcon Glyph="&#xE712;" FontSize="14" />
                             <Button.Flyout>
                                 <MenuFlyout Placement="BottomEdgeAlignedRight">
@@ -337,18 +338,16 @@
                         </Button>
                     </Grid>
 
-                    <Grid Grid.Row="1">
-                        <SelectorBar x:Name="DictionaryFilter" SelectionChanged="DictionaryFilter_SelectionChanged">
-                            <SelectorBarItem x:Name="FilterAll" Text="All" Tag="all" IsSelected="True" />
-                            <SelectorBarItem x:Name="FilterWords" Text="Words" Tag="words" />
-                            <SelectorBarItem x:Name="FilterReplacements" Text="Replacements" Tag="replacements" />
-                            <SelectorBarItem x:Name="FilterSnippets" Text="Snippets" Tag="snippets" />
-                        </SelectorBar>
-                    </Grid>
+                    <SelectorBar x:Name="DictionaryFilter" Grid.Row="2" SelectionChanged="DictionaryFilter_SelectionChanged">
+                        <SelectorBarItem x:Name="FilterAll" Text="All" Tag="all" IsSelected="True" />
+                        <SelectorBarItem x:Name="FilterWords" Text="Words" Tag="words" />
+                        <SelectorBarItem x:Name="FilterReplacements" Text="Replacements" Tag="replacements" />
+                        <SelectorBarItem x:Name="FilterSnippets" Text="Snippets" Tag="snippets" />
+                    </SelectorBar>
 
-                    <InfoBar x:Name="DictionaryBar" Grid.Row="2" IsClosable="True" />
+                    <InfoBar x:Name="DictionaryBar" Grid.Row="3" IsClosable="True" />
 
-                    <Grid Grid.Row="3">
+                    <Grid Grid.Row="4">
                         <ListView x:Name="DictionaryList" SelectionMode="None" IsItemClickEnabled="True"
                                   ItemClick="DictionaryList_ItemClick" Padding="0,0,0,8">
                             <ListView.ItemContainerStyle>

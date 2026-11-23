@@ -34,6 +34,11 @@ internal sealed class GlyphMenu
         _window.AppWindow.SetPresenter(presenter);
         _window.AppWindow.IsShownInSwitchers = false;
         SetWindowLongPtr(_hwnd, GWL_EXSTYLE, GetWindowLongPtr(_hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW);
+        // No frame line, corners or shadow from Windows: the window itself must never be seen.
+        var policy = DWMNCRP_DISABLED;
+        DwmSetWindowAttribute(_hwnd, DWMWA_NCRENDERING_POLICY, ref policy, sizeof(int));
+        var noBorder = DWMWA_COLOR_NONE;
+        DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref noBorder, sizeof(int));
         _window.AppWindow.Closing += (_, e) =>
         {
             e.Cancel = true;
@@ -69,12 +74,13 @@ internal sealed class GlyphMenu
         };
         _open = menu;
 
-        // The window covers the glyph (a little above it, so the menu clears the taskbar edge),
-        // clipped to nothing so it never draws over the glyph.
-        var size = Math.Max(1, glyph.Right - glyph.Left);
-        _window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(glyph.Left, glyph.Top - 8, size, 8));
-        SetWindowRgn(_hwnd, CreateRectRgn(0, 0, 0, 0), true);
+        // A 1 px window just above the glyph's top-left corner, clipped to nothing, so only the
+        // menu (its own popup window) is ever seen.
+        _window.AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(glyph.Left, glyph.Top - 8, 1, 1));
+        SetWindowRgn(_hwnd, CreateRectRgn(0, 0, 0, 0), false);
         _window.AppWindow.Show();
+        // Showing can reset the region; clip again once it is up.
+        SetWindowRgn(_hwnd, CreateRectRgn(0, 0, 0, 0), true);
         _window.Activate();
         // A menu closes on an outside click only when its window is in the foreground.
         SetForegroundWindow(_hwnd);
@@ -89,6 +95,10 @@ internal sealed class GlyphMenu
     }
 
     private const int GWL_EXSTYLE = -20;
+    private const int DWMWA_NCRENDERING_POLICY = 2, DWMNCRP_DISABLED = 1, DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
+
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
     private const nint WS_EX_TOOLWINDOW = 0x00000080;
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(IntPtr hwnd, int index);
