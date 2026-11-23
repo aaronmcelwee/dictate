@@ -370,8 +370,26 @@ public sealed partial class MainWindow : Window
     private void DeleteEntry_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not DictionaryRow row) return;
-        _host.Words.Remove(row.Entry.Phrase);
-        _host.Write($"dict  removed \"{row.Entry.Phrase}\"");
+        RemoveWithUndo(row.Entry);
+    }
+
+    private GrokVoice.Words.DictionaryEntry? _removed;
+
+    /// <summary>Removes an entry and offers Undo, since a remove is one click.</summary>
+    private void RemoveWithUndo(GrokVoice.Words.DictionaryEntry entry)
+    {
+        _host.Words.Remove(entry.Phrase);
+        _host.Write($"dict  removed \"{entry.Phrase}\"");
+        _removed = entry;
+        var undo = new Button { Content = "Undo" };
+        undo.Click += (_, _) =>
+        {
+            if (_removed is { } back) _host.Words.Merge([back]);
+            _removed = null;
+            DictionaryBar.IsOpen = false;
+        };
+        DictionaryBar.ActionButton = undo;
+        ShowDictionaryBar(InfoBarSeverity.Informational, "Removed", $"\"{entry.Phrase}\"");
     }
 
     private async void ClearDictionary_Click(object sender, RoutedEventArgs e)
@@ -428,7 +446,7 @@ public sealed partial class MainWindow : Window
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Secondary && entry is not null)
         {
-            _host.Words.Remove(entry.Phrase);
+            RemoveWithUndo(entry);
             return;
         }
         if (result != ContentDialogResult.Primary) return;
@@ -490,6 +508,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowDictionaryBar(InfoBarSeverity severity, string title, string message)
     {
+        if (title != "Removed") DictionaryBar.ActionButton = null;
         DictionaryBar.Severity = severity;
         DictionaryBar.Title = title;
         DictionaryBar.Message = message;
@@ -738,4 +757,8 @@ public sealed class DictionaryRow
     public string Detail => Entry.Replacement is { } r ? "→ " + r.ReplaceLineEndings(" ") : "";
     public Visibility DetailVisibility => Entry.Replacement is null ? Visibility.Collapsed : Visibility.Visible;
     public string Kind => Entry.IsSnippet ? "Snippet" : Entry.Replacement is null ? "Word" : "Replacement";
+    public string RemoveName => $"Remove {Entry.Phrase}";
+
+    /// <summary>What screen readers and UI Automation read for the row.</summary>
+    public override string ToString() => Entry.Replacement is { } r ? $"{Entry.Phrase}, writes {r}" : Entry.Phrase;
 }

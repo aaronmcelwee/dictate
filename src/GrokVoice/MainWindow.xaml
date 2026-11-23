@@ -305,15 +305,20 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Dictionary" Style="{StaticResource TitleTextBlockStyle}" />
-                        <Button Grid.Column="1" Style="{StaticResource AccentButtonStyle}" Click="AddEntry_Click" VerticalAlignment="Center">
+                        <AutoSuggestBox x:Name="DictionarySearch" Grid.Column="1" Width="220" PlaceholderText="Search"
+                                        AutomationProperties.Name="Search the dictionary"
+                                        QueryIcon="Find" VerticalAlignment="Center" TextChanged="DictionarySearch_TextChanged" />
+                        <Button Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="AddEntry_Click" VerticalAlignment="Center"
+                                AutomationProperties.Name="Add">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE710;" FontSize="14" />
                                 <TextBlock Text="Add" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="2" VerticalAlignment="Center" ToolTipService.ToolTip="More">
+                        <Button Grid.Column="3" VerticalAlignment="Center" ToolTipService.ToolTip="More" AutomationProperties.Name="More">
                             <FontIcon Glyph="&#xE712;" FontSize="14" />
                             <Button.Flyout>
                                 <MenuFlyout Placement="BottomEdgeAlignedRight">
@@ -332,19 +337,13 @@
                         </Button>
                     </Grid>
 
-                    <Grid Grid.Row="1" ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
+                    <Grid Grid.Row="1">
                         <SelectorBar x:Name="DictionaryFilter" SelectionChanged="DictionaryFilter_SelectionChanged">
                             <SelectorBarItem x:Name="FilterAll" Text="All" Tag="all" IsSelected="True" />
                             <SelectorBarItem x:Name="FilterWords" Text="Words" Tag="words" />
                             <SelectorBarItem x:Name="FilterReplacements" Text="Replacements" Tag="replacements" />
                             <SelectorBarItem x:Name="FilterSnippets" Text="Snippets" Tag="snippets" />
                         </SelectorBar>
-                        <AutoSuggestBox x:Name="DictionarySearch" Grid.Column="1" Width="240" PlaceholderText="Search"
-                                        QueryIcon="Find" VerticalAlignment="Center" TextChanged="DictionarySearch_TextChanged" />
                     </Grid>
 
                     <InfoBar x:Name="DictionaryBar" Grid.Row="2" IsClosable="True" />
@@ -381,7 +380,8 @@
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                         <Button Grid.Column="2" Click="DeleteEntry_Click" Background="Transparent" BorderThickness="0"
-                                                VerticalAlignment="Center" ToolTipService.ToolTip="Remove">
+                                                VerticalAlignment="Center" ToolTipService.ToolTip="Remove"
+                                                AutomationProperties.Name="{x:Bind RemoveName}">
                                             <FontIcon Glyph="&#xE74D;" FontSize="14" />
                                         </Button>
                                     </Grid>
