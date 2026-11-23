@@ -72,6 +72,25 @@ internal sealed class WordDictionary
         return added;
     }
 
+    /// <summary>Removes the entry for a phrase. Returns false if there was none.</summary>
+    public bool Remove(string phrase)
+    {
+        var count = _entries.RemoveAll(e => string.Equals(e.Phrase, phrase, StringComparison.OrdinalIgnoreCase));
+        if (count == 0) return false;
+        Save();
+        Rebuild();
+        Changed?.Invoke();
+        return true;
+    }
+
+    /// <summary>Replaces one entry with another (the phrase itself may change).</summary>
+    public void Update(string oldPhrase, DictionaryEntry entry)
+    {
+        if (!string.Equals(oldPhrase, entry.Phrase.Trim(), StringComparison.OrdinalIgnoreCase))
+            _entries.RemoveAll(e => string.Equals(e.Phrase, oldPhrase, StringComparison.OrdinalIgnoreCase));
+        Merge([entry]);
+    }
+
     public void Clear()
     {
         _entries = [];

@@ -56,7 +56,7 @@ public sealed partial class RecordingPill : Window
     private readonly double[] _barTarget = new double[BarCount];
     private readonly double[] _envelope = new double[BarCount];
     private readonly Random _random = new();
-    private readonly TextBlock _measure = new() { FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly TextBlock _measure = new() { FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
 
     private enum Look { Rest, Listening, Transcribing, Message }
     private Look _look;
@@ -304,10 +304,11 @@ public sealed partial class RecordingPill : Window
         }
         RemoveTransient();
         Turns.Children.Add(MyTurn(text));
-        _pending = new TextBlock
+        // Windows' own busy indicator while the bot works.
+        _pending = new ProgressRing
         {
-            Text = "•••", FontSize = 13, CharacterSpacing = 200,
-            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Anchored ? Amber : Windows.UI.Color.FromArgb(255, 125, 125, 132)),
+            IsActive = true, Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Left,
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Anchored ? Amber : Windows.UI.Color.FromArgb(255, 200, 200, 204)),
         };
         Turns.Children.Add(_pending);
         _look = Look.Message;
@@ -335,8 +336,8 @@ public sealed partial class RecordingPill : Window
     {
         var block = new RichTextBlock
         {
-            FontSize = 13.5, LineHeight = 20, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = false,
-            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 212, 212, 216)),
+            FontSize = 14, LineHeight = 20, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = false,
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
         };
         if (markdown) MarkdownInlines.FillBlocks(block.Blocks, text);
         else MarkdownInlines.FillPlain(block.Blocks, text);
@@ -347,12 +348,14 @@ public sealed partial class RecordingPill : Window
     {
         HorizontalAlignment = HorizontalAlignment.Right,
         MaxWidth = (ReplyWidthDip - 14 - 14 - 8) * 0.8,
-        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 60, 60, 60)),
-        CornerRadius = new CornerRadius(12, 12, 4, 12),
-        Padding = new Thickness(10, 6, 10, 7),
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 58, 58, 58)),
+        BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(24, 255, 255, 255)),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(12, 7, 12, 8),
         Child = new TextBlock
         {
-            Text = text, FontSize = 13.5, LineHeight = 20, TextWrapping = TextWrapping.Wrap,
+            Text = text, FontSize = 14, LineHeight = 20, TextWrapping = TextWrapping.Wrap,
             Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 242, 242, 242)),
         },
     };
@@ -410,23 +413,32 @@ public sealed partial class RecordingPill : Window
     /// <summary>Insert and Copy under the newest reply.</summary>
     private StackPanel Actions(string text)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Tag = "actions" };
-        Button Make(string label, string glyph, Action click)
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Tag = "actions", Margin = new Thickness(0, 2, 0, 0) };
+        var insert = new Button
         {
-            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            content.Children.Add(new FontIcon { Glyph = glyph, FontSize = 12 });
-            content.Children.Add(new TextBlock { Text = label, FontSize = 12 });
-            var button = new Button { Content = content, Padding = new Thickness(10, 4, 10, 5), MinHeight = 28 };
-            button.Click += (_, _) => click();
-            return button;
-        }
-        row.Children.Add(Make("Insert", "\uE8D2", () => InsertRequested?.Invoke(text)));
-        row.Children.Add(Make("Copy", "\uE8C8", () =>
+            Content = "Insert",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            MinWidth = 88,
+        };
+        ToolTipService.SetToolTip(insert, "Type this where your cursor is");
+        insert.Click += (_, _) => InsertRequested?.Invoke(text);
+        var copy = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE8C8", FontSize = 14 },
+            Width = 32, Height = 32, Padding = new Thickness(0),
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+        };
+        ToolTipService.SetToolTip(copy, "Copy");
+        copy.Click += (_, _) =>
         {
             var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
             data.SetText(text);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
-        }));
+            copy.Content = new FontIcon { Glyph = "\uE73E", FontSize = 14 };
+        };
+        row.Children.Add(insert);
+        row.Children.Add(copy);
         return row;
     }
 

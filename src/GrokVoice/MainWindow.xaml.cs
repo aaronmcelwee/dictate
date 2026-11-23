@@ -35,7 +35,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(900, 900));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1040, 760));
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _host.MainWindowHandle = hwnd;
@@ -72,7 +72,6 @@ public sealed partial class MainWindow : Window
         LanguageBox.SelectedIndex = Math.Max(0, Array.FindIndex(Languages, l => l.Code == _host.Settings.Language));
         EngineBox.SelectedIndex = _host.Settings.SpeechEngine == "elevenlabs" ? 1 : 0;
         ShowElevenKeyState();
-        WarmMicSwitch.IsOn = _host.KeepMicWarm;
         RightAltSwitch.IsOn = _host.RightAltEnabled;
         PolishSwitch.IsOn = _host.Settings.PolishEnabled;
         RestingSwitch.IsOn = _host.RestingPill;
@@ -84,6 +83,7 @@ public sealed partial class MainWindow : Window
         _host.Updates.StatusChanged += () => DispatcherQueue.TryEnqueue(ShowUpdateStatus);
         ShowUpdateStatus();
         ShowDictionary();
+        _host.Words.Changed += () => DispatcherQueue.TryEnqueue(ShowDictionary);
         ShowBotState();
         ShowApiKeyState();
         ShowKeyRegistration();
@@ -98,8 +98,33 @@ public sealed partial class MainWindow : Window
     {
         AppWindow.Show();
         Activate();
-        if (string.IsNullOrWhiteSpace(_host.Keys.Get()))
-            ApiKeyBox.Focus(FocusState.Programmatic);
+        if (_host.SetupNeeded is not null) Navigate("Accounts");
+    }
+
+    private void Nav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    {
+        if (args.SelectedItem is NavigationViewItem { Tag: string tag }) ShowPage(tag);
+    }
+
+    private void Navigate(string tag)
+    {
+        var item = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == tag);
+        if (item is not null) Nav.SelectedItem = item;
+    }
+
+    private void ShowPage(string tag)
+    {
+        // Nav fires before InitializeComponent has made every page.
+        if (GeneralPage is null || DictionaryPage is null) return;
+        foreach (var (name, page) in new (string, UIElement)[]
+        {
+            ("General", GeneralPage), ("Dictation", DictationPage), ("Jeeves", JeevesPage),
+            ("Usage", UsagePage), ("Accounts", AccountsPage), ("About", AboutPage),
+        })
+            page.Visibility = name == tag ? Visibility.Visible : Visibility.Collapsed;
+        DictionaryPage.Visibility = tag == "Dictionary" ? Visibility.Visible : Visibility.Collapsed;
+        PageScroller.Visibility = tag == "Dictionary" ? Visibility.Collapsed : Visibility.Visible;
+        PageScroller.ChangeView(null, 0, null, disableAnimation: true);
     }
 
     private void OnStatus(DictationStatus status)
@@ -118,7 +143,6 @@ public sealed partial class MainWindow : Window
         var saved = !string.IsNullOrWhiteSpace(_host.Keys.Get());
         ApiKeyState.Text = saved ? "Saved" : "Not set";
         RemoveKeyButton.IsEnabled = saved;
-        TestKeyButton.IsEnabled = saved;
         ApiKeyBox.PlaceholderText = saved ? "Saved. Paste a new key to replace it." : "xai-…";
         OnStatus(_host.Status);
     }
@@ -147,10 +171,10 @@ public sealed partial class MainWindow : Window
         KeyBar.IsOpen = !ours;
         KeyBar.Severity = InfoBarSeverity.Warning;
         KeyBar.Title = "The Copilot key isn't set to Murmur";
-        KeyBar.Message = "Open Customize Copilot key below and choose Murmur. Right Alt works either way.";
+        KeyBar.Message = "Open Copilot key below and choose Murmur. Right Alt works either way.";
         CopilotKeyCard.Description = ours
-            ? "Murmur owns the Copilot key."
-            : "Choose Murmur under Personalization > Text input.";
+            ? "Set to Murmur. Hold to talk to Jeeves, tap to open Grok Bot."
+            : "Choose Murmur in Windows Settings.";
     }
 
     private void SaveKey_Click(object sender, RoutedEventArgs e) => SaveKey();
@@ -172,17 +196,13 @@ public sealed partial class MainWindow : Window
         await TestAsync();
     }
 
-    private async void TestKey_Click(object sender, RoutedEventArgs e) => await TestAsync();
-
     private async Task TestAsync()
     {
         if (_host.Keys.Get() is not { Length: > 0 } key) return;
         TestBar.IsOpen = false;
         TestRing.IsActive = true;
-        TestKeyButton.IsEnabled = false;
         var error = await _host.TestKeyAsync(key);
         TestRing.IsActive = false;
-        TestKeyButton.IsEnabled = true;
 
         TestBar.Severity = error is null ? InfoBarSeverity.Success : InfoBarSeverity.Error;
         TestBar.Title = error is null ? "Grok is connected" : "Grok didn't accept the connection";
@@ -208,7 +228,6 @@ public sealed partial class MainWindow : Window
         BotSignInButton.Content = _signIn is not null ? "Cancel" : signedIn ? "Sign out" : "Sign in";
         BotSignInButton.Style = !signedIn && _signIn is null ? (Style)Application.Current.Resources["AccentButtonStyle"] : null;
         BotBox.IsEnabled = signedIn;
-        ShowAvatarClip();
     }
 
     private void ShowBotError(string title, string message)
@@ -296,49 +315,128 @@ public sealed partial class MainWindow : Window
         ShowBotState();
     }
 
-    private void ShowAvatarClip()
-    {
-        var id = _host.Settings.BotId;
-        var path = _host.Settings.AvatarClip(id);
-        AvatarCard.IsEnabled = id.Length > 0;
-        AvatarName.Text = path.Length > 0 ? Path.GetFileName(path) : "None";
-        AvatarRemoveButton.Visibility = path.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private async void AvatarChoose_Click(object sender, RoutedEventArgs e)
-    {
-        var picker = new Windows.Storage.Pickers.FileOpenPicker
-        {
-            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.VideosLibrary,
-        };
-        foreach (var ext in new[] { ".mp4", ".webm", ".mov" }) picker.FileTypeFilter.Add(ext);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        var file = await picker.PickSingleFileAsync();
-        if (file is null) return;
-        _host.Settings.SetAvatarClip(_host.Settings.BotId, file.Path);
-        _host.Write($"bot   character clip set to {file.Name}");
-        ShowAvatarClip();
-    }
-
-    private void AvatarRemove_Click(object sender, RoutedEventArgs e)
-    {
-        _host.Settings.SetAvatarClip(_host.Settings.BotId, null);
-        ShowAvatarClip();
-    }
-
     private void PolishSwitch_Toggled(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
         _host.Settings.PolishEnabled = PolishSwitch.IsOn;
     }
 
+    private string _dictionaryFilter = "all";
+
     private void ShowDictionary()
     {
         var d = _host.Words;
-        DictionaryCard.Description = d.Entries.Count == 0
-            ? "Your words, replacements and snippets. Import them from Wispr Flow to start."
-            : $"{d.Words} words, {d.Replacements} replacements and {d.Snippets} snippets.";
+        var query = DictionarySearch.Text.Trim();
+        var rows = d.Entries
+            .Where(e => _dictionaryFilter switch
+            {
+                "words" => e.Replacement is null,
+                "replacements" => e.Replacement is not null && !e.IsSnippet,
+                "snippets" => e.IsSnippet,
+                _ => true,
+            })
+            .Where(e => query.Length == 0
+                || e.Phrase.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || (e.Replacement?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Select(e => new DictionaryRow(e))
+            .ToList();
+        DictionaryList.ItemsSource = rows;
+        FilterAll.Text = $"All ({d.Entries.Count})";
+        FilterWords.Text = $"Words ({d.Words})";
+        FilterReplacements.Text = $"Replacements ({d.Replacements})";
+        FilterSnippets.Text = $"Snippets ({d.Snippets})";
+        DictionaryEmpty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        DictionaryEmptyText.Text = d.Entries.Count == 0
+            ? "Add names and words Murmur should spell your way, or phrases it should swap for something else."
+            : "Nothing matches.";
         WisprImportButton.IsEnabled = GrokVoice.Words.WisprImport.DatabasePath is not null;
+    }
+
+    private void DictionarySearch_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) => ShowDictionary();
+
+    private void DictionaryFilter_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        _dictionaryFilter = sender.SelectedItem?.Tag as string ?? "all";
+        if (DictionaryList is not null) ShowDictionary();
+    }
+
+    private async void AddEntry_Click(object sender, RoutedEventArgs e) => await EditEntryAsync(null);
+
+    private async void DictionaryList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is DictionaryRow row) await EditEntryAsync(row.Entry);
+    }
+
+    private void DeleteEntry_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not DictionaryRow row) return;
+        _host.Words.Remove(row.Entry.Phrase);
+        _host.Write($"dict  removed \"{row.Entry.Phrase}\"");
+    }
+
+    private async void ClearDictionary_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Remove everything?",
+            Content = $"All {_host.Words.Entries.Count} entries will be removed. This can't be undone.",
+            PrimaryButtonText = "Remove",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        _host.Words.Clear();
+        _host.Write("dict  cleared");
+    }
+
+    /// <summary>The add and edit dialog: what you say, and optionally what to write instead.</summary>
+    private async Task EditEntryAsync(GrokVoice.Words.DictionaryEntry? entry)
+    {
+        var phrase = new TextBox { Header = "When I say", Text = entry?.Phrase ?? "", PlaceholderText = "A word, name or phrase" };
+        var replacement = new TextBox
+        {
+            Header = "Write instead (optional)",
+            Text = entry?.Replacement ?? "",
+            PlaceholderText = "Leave empty to just fix the spelling",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MaxHeight = 160,
+        };
+        var snippet = new CheckBox
+        {
+            Content = "Snippet (a longer block of text, like an address)",
+            IsChecked = entry?.IsSnippet ?? false,
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = entry is null ? "Add to dictionary" : "Edit entry",
+            Content = new StackPanel { Spacing = 12, MinWidth = 400, Children = { phrase, replacement, snippet } },
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = phrase.Text.Trim().Length > 0,
+        };
+        if (entry is not null) dialog.SecondaryButtonText = "Remove";
+        phrase.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = phrase.Text.Trim().Length > 0;
+        void SnippetState() => snippet.IsEnabled = replacement.Text.Trim().Length > 0;
+        replacement.TextChanged += (_, _) => SnippetState();
+        SnippetState();
+        dialog.Opened += (_, _) => phrase.Focus(FocusState.Programmatic);
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Secondary && entry is not null)
+        {
+            _host.Words.Remove(entry.Phrase);
+            return;
+        }
+        if (result != ContentDialogResult.Primary) return;
+        var updated = new GrokVoice.Words.DictionaryEntry(phrase.Text.Trim(),
+            replacement.Text.Trim() is { Length: > 0 } r ? r : null, snippet.IsChecked == true);
+        if (entry is null) _host.Words.Merge([updated]);
+        else _host.Words.Update(entry.Phrase, updated);
+        _host.Write($"dict  {(entry is null ? "added" : "edited")} \"{updated.Phrase}\"");
     }
 
     private async void WisprImport_Click(object sender, RoutedEventArgs e)
@@ -498,8 +596,7 @@ public sealed partial class MainWindow : Window
         [
             ("Today", usage.Today),
             ("This week", usage.ThisWeek),
-            ("Month to date", usage.MonthToDate),
-            ("Year to date", usage.YearToDate),
+            ("This month", usage.MonthToDate),
             ("All time", usage.AllTime),
         ];
         UsageGrid.Children.Clear();
@@ -518,7 +615,7 @@ public sealed partial class MainWindow : Window
             UsageGrid.Children.Add(block);
         }
         UsageGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        string[] headers = ["", "Dictations", "Audio", "Grok", "ElevenLabs", "Clean-up", "Total (USD)"];
+        string[] headers = ["", "Dictations", "Audio", "Cost"];
         for (var c = 0; c < headers.Length; c++) Cell(0, c, headers[c], header: true);
         for (var r = 0; r < rows.Length; r++)
         {
@@ -527,17 +624,11 @@ public sealed partial class MainWindow : Window
             Cell(r + 1, 0, rows[r].Name);
             Cell(r + 1, 1, t.Dictations.ToString("N0"));
             Cell(r + 1, 2, FormatAudio(t.AudioSeconds));
-            Cell(r + 1, 3, FormatCost(t.GrokTranscribeCost));
-            Cell(r + 1, 4, FormatCost(t.ScribeCost));
-            Cell(r + 1, 5, FormatCost(t.CleanUpCost));
-            Cell(r + 1, 6, FormatCost(t.Cost), strong: true);
+            Cell(r + 1, 3, FormatCost(t.Cost), strong: true);
         }
-        var all = usage.AllTime;
-        UsageNote.Text = $"All time: Grok speech to text {FormatCost(all.GrokTranscribeCost)} ({FormatAudio(all.AudioSeconds - all.ScribeSeconds)}), "
-            + $"ElevenLabs Scribe {FormatCost(all.ScribeCost)} ({FormatAudio(all.ScribeSeconds)}), "
-            + $"clean-up {FormatCost(all.CleanUpCost)} ({all.InputTokens:N0} tokens in, {all.OutputTokens:N0} out). Counted on this PC; benchmark runs from 0.2.59 on are logged separately. "
-            + $"Grok costs use xAI's own figure where the response gives one, else list prices; ElevenLabs uses its list price of ${GrokVoice.Usage.UsageLog.ScribePerHour:0.00} an hour. "
-            + "Messages to Grok Bot go through your Grok subscription and aren't billed here.";
+        var month = usage.MonthToDate;
+        UsageNote.Text = $"This month: ElevenLabs {FormatCost(month.ScribeCost)}, Grok speech to text {FormatCost(month.GrokTranscribeCost)}, "
+            + $"clean-up {FormatCost(month.CleanUpCost)}. Jeeves runs on your Grok subscription and isn't counted here.";
     }
 
     private static string FormatAudio(double seconds) =>
@@ -553,12 +644,6 @@ public sealed partial class MainWindow : Window
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         if (await picker.PickSaveFileAsync() is { } file)
             await Windows.Storage.FileIO.WriteTextAsync(file, _host.Usage.ToCsv());
-    }
-
-    private void WarmMicSwitch_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading) return;
-        _host.KeepMicWarm = WarmMicSwitch.IsOn;
     }
 
     private async Task LoadStartupStateAsync()
@@ -606,7 +691,7 @@ public sealed partial class MainWindow : Window
         var status = _host.Updates.Status;
         UpdatesCard.Description = status.Length > 0 && !status.StartsWith("Up to date")
             ? $"{version}. {status}"
-            : $"{version}, up to date as of the last check. New versions install in place while you're not dictating; Murmur restarts on its own.";
+            : $"{version}. Updates install on their own.";
     }
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
@@ -618,9 +703,6 @@ public sealed partial class MainWindow : Window
 
     private async void CopilotKeySettings_Click(object sender, RoutedEventArgs e) =>
         await Launcher.LaunchUriAsync(new Uri("ms-settings:personalization-textinput"));
-
-    private async void MicPrivacy_Click(object sender, RoutedEventArgs e) =>
-        await Launcher.LaunchUriAsync(new Uri("ms-settings:privacy-microphone"));
 
     private void CopyLast_Click(object sender, RoutedEventArgs e)
     {
@@ -644,4 +726,16 @@ public sealed partial class MainWindow : Window
         _host.Dispose();
         Application.Current.Exit();
     }
+}
+
+/// <summary>One row of the dictionary list.</summary>
+public sealed class DictionaryRow
+{
+    internal DictionaryRow(GrokVoice.Words.DictionaryEntry entry) => Entry = entry;
+
+    internal GrokVoice.Words.DictionaryEntry Entry { get; }
+    public string Phrase => Entry.Phrase;
+    public string Detail => Entry.Replacement is { } r ? "→ " + r.ReplaceLineEndings(" ") : "";
+    public Visibility DetailVisibility => Entry.Replacement is null ? Visibility.Collapsed : Visibility.Visible;
+    public string Kind => Entry.IsSnippet ? "Snippet" : Entry.Replacement is null ? "Word" : "Replacement";
 }
