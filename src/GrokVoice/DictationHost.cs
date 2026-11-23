@@ -114,8 +114,9 @@ internal sealed class DictationHost : IDisposable
         _pill.InsertRequested += InsertReply;
         _glyph.Clicked += () =>
         {
+            // Clicking the glyph opens Murmur's settings (or closes an open Jeeves card).
             if (_pill.ShowingConversation) _pill.Hide();
-            else if (_controller.Status == DictationStatus.Idle) OpenGrokBot();
+            else SettingsRequested?.Invoke();
         };
         _glyph.Hovering += on =>
         {
@@ -176,32 +177,26 @@ internal sealed class DictationHost : IDisposable
     /// <summary>The glyph's menu asked to quit.</summary>
     public event Action? QuitRequested;
 
+    private GlyphMenu? _menu;
+
     private void ShowMenu(int x, int y)
     {
         _pill.HideTip();
-        const int pause = 1, settings = 2, quit = 3;
-        var chosen = _glyph.ShowMenu(x, y,
+        _menu ??= new GlyphMenu();
+        _menu.Show(_glyph.Bounds,
         [
-            (pause, Paused ? "Resume Murmur" : "Pause Murmur", false),
-            (settings, "Settings", false),
-            (0, "", false),
-            (quit, "Quit Murmur", false),
-        ]);
-        switch (chosen)
-        {
-            case pause:
+            new("Settings", "\uE713", () => SettingsRequested?.Invoke()),
+            new("Open Grok Bot", "\uE8A7", OpenGrokBot),
+            new(Paused ? "Resume" : "Pause", Paused ? "\uE768" : "\uE769", () =>
+            {
                 Paused = !Paused;
                 _hook.RightAltEnabled = Settings.RightAltEnabled && !Paused;
                 Write(Paused ? "paused" : "resumed");
                 UpdateGlyph();
-                break;
-            case settings:
-                SettingsRequested?.Invoke();
-                break;
-            case quit:
-                QuitRequested?.Invoke();
-                break;
-        }
+            }),
+            null,
+            new("Quit Murmur", "\uE711", () => QuitRequested?.Invoke()),
+        ]);
     }
 
     /// <summary>Insert under a Jeeves reply: types it where the cursor is (the card never takes focus).</summary>
