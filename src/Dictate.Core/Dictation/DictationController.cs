@@ -43,6 +43,8 @@ public sealed class DictationController : IDisposable
     private readonly int _sampleRate;
     private Session? _session;
     private bool _keepMicWarm;
+    private bool _primed;
+    private ITimer? _primeTimer;
     private int _finishing;
 
     public DictationController(
@@ -97,6 +99,43 @@ public sealed class DictationController : IDisposable
         }
     }
 
+    /// <summary>
+    /// A dictation key went down: with the mic kept closed between dictations, open it now and keep
+    /// what it hears in the pre-roll, so the start of a hold (reported ~300 ms later) isn't lost.
+    /// Closes again after <paramref name="window"/> if no dictation starts (a tap, a shortcut).
+    /// </summary>
+    public void Prime(TimeSpan window)
+    {
+        lock (_gate)
+        {
+            if (_keepMicWarm || _session is not null) return;
+            if (!_primed)
+            {
+                _primed = true;
+                _preRoll.Drain();
+                _audio.Start();
+            }
+            _primeTimer?.Dispose();
+            _primeTimer = TimeProvider.System.CreateTimer(_ => Unprime(), null, window, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private void Unprime()
+    {
+        lock (_gate)
+        {
+            _primeTimer?.Dispose();
+            _primeTimer = null;
+            if (!_primed) return;
+            _primed = false;
+            if (_session is null && !_keepMicWarm)
+            {
+                _audio.Stop();
+                _preRoll.Drain();
+            }
+        }
+    }
+
     public void Handle(DictationAction action)
     {
         switch (action)
@@ -146,10 +185,14 @@ public sealed class DictationController : IDisposable
                 if (ReferenceEquals(Volatile.Read(ref _session), session)) TextChanged?.Invoke(text);
             };
 
-            if (_keepMicWarm)
+            if (_keepMicWarm || _primed)
             {
+                // The mic is already open: start with what it heard just before.
                 var pre = _preRoll.Drain();
                 if (pre.Length > 0) session.Audio.Writer.TryWrite(pre);
+                _primed = false;
+                _primeTimer?.Dispose();
+                _primeTimer = null;
             }
             else
             {
@@ -181,7 +224,7 @@ public sealed class DictationController : IDisposable
         {
             if (_session is { } s)
                 s.Audio.Writer.TryWrite(pcm.ToArray());
-            else if (_keepMicWarm)
+            else if (_keepMicWarm || _primed)
                 _preRoll.Write(pcm.Span);
         }
     }
@@ -273,6 +316,7 @@ public sealed class DictationController : IDisposable
     public void Dispose()
     {
         _audio.AudioAvailable -= OnAudio;
+        _primeTimer?.Dispose();
         _audio.Stop();
         if (TakeSession() is { } s) _ = DiscardAsync(s);
     }
