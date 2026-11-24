@@ -465,29 +465,43 @@ internal sealed class DictationHost : IDisposable
     /// ("summarize this", "draft a reply", "tell him") gets the selection and the nearby text
     /// appended, so the bot knows what "this" is.
     /// </summary>
-    private string WithScreenContext(string text)
+    private BotMessage WithScreenContext(string text)
     {
         var capture = GrokVoice.Context.AppAwareness.IsCapture(text);
         var message = capture
             ? $"Quick capture from Murmur. File this as a reminder, task or list item as fits, then confirm in one short line:\n{text}"
             : text;
-        if (!Settings.ScreenContext || _context is not { IsCompletedSuccessfully: true } done) return message;
+        if (!Settings.ScreenContext || _context is not { IsCompletedSuccessfully: true } done) return BotMessage.Plain(message);
         var context = done.Result;
-        if (context.Text.Length == 0 && context.Selection.Length == 0) return message;
+        if (context.Text.Length == 0 && context.Selection.Length == 0 && context.Screenshot is null) return BotMessage.Plain(message);
         // A capture only takes the screen along when it names it ("remind me to answer this email").
         var wanted = capture
             ? GrokVoice.Context.AppAwareness.NamesScreen(text)
             : context.Selection.Length > 0 || context.IsReplyApp
               || GrokVoice.Context.AppAwareness.ActsOnScreen(text) || GrokVoice.Context.AppAwareness.RefersToScreen(text);
-        if (!wanted) return message;
+        if (!wanted) return BotMessage.Plain(message);
         var where = context.Title.Length > 0 ? $"{context.Process}: {context.Title}" : context.Process;
-        var result = new System.Text.StringBuilder(message).Append("\n\n---\n");
-        if (context.Selection.Length > 0)
-            result.Append($"What I have selected on my screen ({where}):\n{context.Selection}\n\n");
+
+        // The selection stays in the message: it's short and usually the point. The rest of the screen
+        // goes as files: a screenshot of the window and its text.
+        var selection = context.Selection.Length > 0 ? $"What I have selected on my screen ({where}):\n{context.Selection}" : "";
+        var inline = new System.Text.StringBuilder(message).Append("\n\n---\n");
+        if (selection.Length > 0) inline.Append(selection).Append("\n\n");
         if (context.Text.Length > 0)
-            result.Append($"{(context.Selection.Length > 0 ? "Other text" : "Text")} on my screen ({where}, read {context.Source}):\n{context.Text}");
-        Write($"bot   {(capture ? "capture, " : "")}screen context: {context.Selection.Length} selected + {context.Text.Length} chars ({context.Source})");
-        return result.ToString().TrimEnd();
+            inline.Append($"{(context.Selection.Length > 0 ? "Other text" : "Text")} on my screen ({where}, read {context.Source}):\n{context.Text}");
+
+        var files = new List<BotAttachment>();
+        var app = context.Process.Length > 0 ? context.Process : "screen";
+        if (context.Screenshot is { } png) files.Add(new BotAttachment($"Screenshot - {app}.png", png));
+        if (context.Text.Length > 0)
+            files.Add(new BotAttachment($"Screen text - {app}.txt", System.Text.Encoding.UTF8.GetBytes($"{where}\n\n{context.Text}")));
+        var notes = new List<string>();
+        if (selection.Length > 0) notes.Add(selection);
+        if (files.Count > 0) notes.Add($"Attached: my screen ({where}).");
+        var attached = notes.Count > 0 ? $"{message}\n\n---\n{string.Join("\n\n", notes)}" : message;
+
+        Write($"bot   {(capture ? "capture, " : "")}screen context: {context.Selection.Length} selected + {context.Text.Length} chars ({context.Source}), screenshot {(context.Screenshot is { } p ? $"{p.Length / 1024} KB" : "none")}");
+        return new BotMessage(attached, files, inline.ToString().TrimEnd());
     }
 
     private void SaveResult(string heard, string delivered)

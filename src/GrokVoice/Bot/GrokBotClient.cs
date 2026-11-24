@@ -95,7 +95,8 @@ internal sealed class GrokBotClient
     /// the user checks Grok Bot.
     /// </summary>
     /// <returns>The message id, to find the bot's reply with <see cref="WatchRepliesAsync"/>.</returns>
-    public async Task<string> SendAsync(string botId, string prompt, CancellationToken ct)
+    public async Task<string> SendAsync(string botId, string prompt, CancellationToken ct,
+        IReadOnlyList<string>? attachmentPaths = null, IReadOnlyList<string>? attachmentNames = null)
     {
         var messageId = Guid.NewGuid().ToString();
         var body = new JsonObject
@@ -106,10 +107,45 @@ internal sealed class GrokBotClient
             ["sentAtMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
             ["isFork"] = false,
         };
+        if (attachmentPaths is { Count: > 0 })
+        {
+            body["attachmentPaths"] = new JsonArray(attachmentPaths.Select(p => (JsonNode)p).ToArray());
+            body["attachmentNames"] = new JsonArray((attachmentNames ?? attachmentPaths).Select(n => (JsonNode)n).ToArray());
+        }
         var result = await BackendAsync("SendGrokBotUserMessage", body, mutation: true, ct).ConfigureAwait(false);
         if (result is JsonObject o && o["refusal"] is JsonNode refusal)
             throw new TranscriptionException($"Grok Bot refused the instruction: {refusal.ToJsonString()}");
         return messageId;
+    }
+
+    /// <summary>
+    /// Uploads a file for a message, the way Grok Bot's app does when it can't use a direct upload:
+    /// in chunks through UploadGrokBotAgentAttachmentChunk. The last chunk's answer has the path that
+    /// goes in the message's attachmentPaths.
+    /// </summary>
+    public async Task<string> UploadAttachmentAsync(string botId, string fileName, byte[] data, CancellationToken ct)
+    {
+        const int ChunkBytes = 512 * 1024;
+        var uploadId = Guid.NewGuid().ToString();
+        var sha = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+        for (var offset = 0; ; offset += ChunkBytes)
+        {
+            var length = Math.Min(ChunkBytes, data.Length - offset);
+            var body = new JsonObject
+            {
+                ["agentId"] = botId,
+                ["uploadId"] = uploadId,
+                ["fileName"] = fileName,
+                ["offset"] = offset.ToString(),
+                ["totalSize"] = data.Length.ToString(),
+                ["data"] = Convert.ToBase64String(data, offset, length),
+                ["sha256Hex"] = sha,
+            };
+            var result = await BackendAsync("UploadGrokBotAgentAttachmentChunk", body, mutation: false, ct).ConfigureAwait(false);
+            if (result?["path"] is JsonValue v && v.TryGetValue<string>(out var path) && path.Length > 0) return path;
+            if (offset + length >= data.Length)
+                throw new TranscriptionException($"Grok Bot took {fileName} but gave no path for it.");
+        }
     }
 
     /// <summary>

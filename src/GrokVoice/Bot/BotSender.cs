@@ -24,7 +24,7 @@ internal sealed class BotSender(DictationHost host) : IBotSender
         bots.Count == 1 ? bots[0]
         : bots.FirstOrDefault(b => b.Name.StartsWith("Jeeves", StringComparison.OrdinalIgnoreCase));
 
-    public async Task SendAsync(string text, CancellationToken ct)
+    public async Task SendAsync(BotMessage message, CancellationToken ct)
     {
         if (!Client.IsSignedIn)
             throw new TranscriptionException("Sign in to Grok Bot under Main bot in Murmur's settings first.");
@@ -39,8 +39,30 @@ internal sealed class BotSender(DictationHost host) : IBotSender
             Choose(main);
             id = main.Id;
         }
-        var messageId = await Client.SendAsync(id, text, ct).ConfigureAwait(false);
+        var (text, paths, names) = await UploadAsync(id, message, ct).ConfigureAwait(false);
+        var messageId = await Client.SendAsync(id, text, ct, paths, names).ConfigureAwait(false);
         _ = WatchAsync(id, messageId);
+    }
+
+    // Uploads the attachments; if any fails, the message goes with its content written inline instead.
+    private async Task<(string Text, IReadOnlyList<string> Paths, IReadOnlyList<string> Names)> UploadAsync(
+        string botId, BotMessage message, CancellationToken ct)
+    {
+        if (message.Attachments.Count == 0) return (message.Text, [], []);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var paths = new List<string>();
+        try
+        {
+            foreach (var file in message.Attachments)
+                paths.Add(await Client.UploadAttachmentAsync(botId, file.Name, file.Data, ct).ConfigureAwait(false));
+            GrokVoice.Log.Write($"bot   attached {string.Join(", ", message.Attachments.Select(a => $"{a.Name} ({a.Data.Length / 1024} KB)"))} in {clock.ElapsedMilliseconds} ms");
+            return (message.Text, paths, message.Attachments.Select(a => a.Name).ToList());
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            GrokVoice.Log.Write($"bot   couldn't attach files, sending the screen as text: {e.Message}");
+            return (message.Inline, [], []);
+        }
     }
 
     /// <summary>The bot's reply text, on a background thread.</summary>

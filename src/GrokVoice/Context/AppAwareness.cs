@@ -13,6 +13,9 @@ internal enum AppKind { Other, Email, Chat, Ai, Code, Document }
 /// <summary>The app a dictation started in and, when it was worth reading, the text around the cursor.</summary>
 internal sealed record DictationContext(string Process, string Title, AppKind Kind, string Source, string Text, long Milliseconds, string Selection = "")
 {
+    /// <summary>A PNG of the window, taken only for a bot instruction; sent only if the instruction needs the screen.</summary>
+    public byte[]? Screenshot { get; init; }
+
     public static readonly DictationContext None = new("", "", AppKind.Other, "none", "", 0);
 
     /// <summary>Apps where what's on screen is usually what the user is answering.</summary>
@@ -105,6 +108,8 @@ internal static partial class AppAwareness
             if (!readScreen || (kind == AppKind.Code && !forBot)) return new DictationContext(process, title, kind, "app", "", clock.ElapsedMilliseconds);
 
             var max = forBot ? BotMaxChars : MaxChars;
+            // For the bot, grab the window first, before the card has a chance to cover any of it.
+            var shot = forBot ? Grab(hwnd, int.MaxValue) : null;
             var (text, selection) = ReadWithUiAutomation(hwnd, max, forBot ? BotUiaBudget : UiaBudget);
             var source = "uia";
             if (text.Length < 200 && (forBot || kind is AppKind.Email or AppKind.Chat or AppKind.Ai))
@@ -112,7 +117,16 @@ internal static partial class AppAwareness
                 var ocr = await ReadWithOcrAsync(hwnd).ConfigureAwait(false);
                 if (ocr.Length > text.Length) { text = ocr; source = "ocr"; }
             }
-            return new DictationContext(process, title, kind, text.Length == 0 ? "app" : source, Trim(text, max), clock.ElapsedMilliseconds, Trim(selection, max));
+            byte[]? png = null;
+            if (shot is { } s)
+            {
+                try { png = await EncodePngAsync(s).ConfigureAwait(false); }
+                catch (Exception e) { Log.Write($"context screenshot failed: {e.Message}"); }
+            }
+            return new DictationContext(process, title, kind, text.Length == 0 ? "app" : source, Trim(text, max), clock.ElapsedMilliseconds, Trim(selection, max))
+            {
+                Screenshot = png,
+            };
         }
         catch (Exception e)
         {
@@ -246,10 +260,26 @@ internal static partial class AppAwareness
     private static async Task<string> ReadWithOcrAsync(IntPtr hwnd)
     {
         var engine = Windows.Media.Ocr.OcrEngine.TryCreateFromUserProfileLanguages();
-        if (engine is null || !GetWindowRect(hwnd, out var rect)) return "";
-        var width = Math.Min(rect.Right - rect.Left, (int)Windows.Media.Ocr.OcrEngine.MaxImageDimension);
-        var height = Math.Min(rect.Bottom - rect.Top, (int)Windows.Media.Ocr.OcrEngine.MaxImageDimension);
-        if (width < 32 || height < 32) return "";
+        if (engine is null || Grab(hwnd, (int)Windows.Media.Ocr.OcrEngine.MaxImageDimension) is not { } shot) return "";
+        using var image = shot.ToBitmap();
+        var result = await engine.RecognizeAsync(image);
+        return string.Join("\n", result.Lines.Select(l => l.Text).Where(t => t.Trim().Length > 2));
+    }
+
+    private sealed record Shot(byte[] Bgra, int Width, int Height)
+    {
+        public Windows.Graphics.Imaging.SoftwareBitmap ToBitmap() =>
+            Windows.Graphics.Imaging.SoftwareBitmap.CreateCopyFromBuffer(
+                Bgra.AsBuffer(), Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Width, Height, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
+    }
+
+    /// <summary>The window's pixels as on screen, at most <paramref name="maxSide"/> on each side.</summary>
+    private static Shot? Grab(IntPtr hwnd, int maxSide)
+    {
+        if (!GetWindowRect(hwnd, out var rect)) return null;
+        var width = Math.Min(rect.Right - rect.Left, maxSide);
+        var height = Math.Min(rect.Bottom - rect.Top, maxSide);
+        if (width < 32 || height < 32) return null;
 
         var pixels = new byte[width * height * 4];
         var screen = GetDC(IntPtr.Zero);
@@ -274,11 +304,31 @@ internal static partial class AppAwareness
             ReleaseDC(IntPtr.Zero, screen);
         }
         for (var i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
+        return new Shot(pixels, width, height);
+    }
 
-        using var image = Windows.Graphics.Imaging.SoftwareBitmap.CreateCopyFromBuffer(
-            pixels.AsBuffer(), Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, width, height, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied);
-        var result = await engine.RecognizeAsync(image);
-        return string.Join("\n", result.Lines.Select(l => l.Text).Where(t => t.Trim().Length > 2));
+    /// <summary>A PNG of the shot, scaled down to at most 1920 px on its long side.</summary>
+    private static async Task<byte[]> EncodePngAsync(Shot shot)
+    {
+        const int MaxSide = 1920;
+        using var bitmap = shot.ToBitmap();
+        using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+        var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId, stream);
+        encoder.SetSoftwareBitmap(bitmap);
+        var scale = Math.Min(1.0, (double)MaxSide / Math.Max(shot.Width, shot.Height));
+        if (scale < 1.0)
+        {
+            encoder.BitmapTransform.ScaledWidth = (uint)Math.Max(1, shot.Width * scale);
+            encoder.BitmapTransform.ScaledHeight = (uint)Math.Max(1, shot.Height * scale);
+            encoder.BitmapTransform.InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Fant;
+        }
+        await encoder.FlushAsync();
+        var bytes = new byte[stream.Size];
+        stream.Seek(0);
+        using var reader = new Windows.Storage.Streams.DataReader(stream.GetInputStreamAt(0));
+        await reader.LoadAsync((uint)stream.Size);
+        reader.ReadBytes(bytes);
+        return bytes;
     }
 
     /// <summary>Collapses whitespace and keeps the text to a few hundred tokens.</summary>

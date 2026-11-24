@@ -9,12 +9,24 @@ internal enum DictationTarget
     Bot,
 }
 
+/// <summary>A file sent along with an instruction, such as a screenshot of the window.</summary>
+internal sealed record BotAttachment(string Name, byte[] Data);
+
+/// <summary>
+/// An instruction for the bot. <see cref="Attachments"/> go as files; when they can't be uploaded,
+/// <see cref="Inline"/> (the text with the same content written into it) is sent instead.
+/// </summary>
+internal sealed record BotMessage(string Text, IReadOnlyList<BotAttachment> Attachments, string Inline)
+{
+    public static BotMessage Plain(string text) => new(text, [], text);
+}
+
 /// <summary>Sends an instruction to the user's main bot.</summary>
 internal interface IBotSender
 {
     /// <summary>The bot's name for messages, or null when no bot is set up yet.</summary>
     string? BotName { get; }
-    Task SendAsync(string text, CancellationToken ct);
+    Task SendAsync(BotMessage message, CancellationToken ct);
 }
 
 /// <summary>
@@ -22,7 +34,7 @@ internal interface IBotSender
 /// dictation starts and kept until its text has been delivered, even if the other key is pressed.
 /// </summary>
 internal sealed class RoutingTextSink(KeyboardTextSink keyboard, IBotSender bot, Func<string, CancellationToken, Task<string>> polish,
-    Func<string, string>? forBot = null) : ITextSink
+    Func<string, BotMessage>? forBot = null) : ITextSink
 {
     private DictationTarget _next = DictationTarget.Cursor;
     private DictationTarget _current = DictationTarget.Cursor;
@@ -54,7 +66,7 @@ internal sealed class RoutingTextSink(KeyboardTextSink keyboard, IBotSender bot,
         LastDelivered = text;
         await (_current switch
         {
-            DictationTarget.Bot => bot.SendAsync(forBot?.Invoke(text) ?? text, ct),
+            DictationTarget.Bot => bot.SendAsync(forBot?.Invoke(text) ?? BotMessage.Plain(text), ct),
             _ => Keyboard.InsertAsync(text, ct),
         }).ConfigureAwait(false);
     }
